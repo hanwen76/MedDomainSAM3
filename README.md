@@ -1,396 +1,562 @@
-# SAM 3: Segment Anything with Concepts
+# SAM3 本地开发说明
 
-Meta Superintelligence Labs
+这个仓库当前不再保留官方仓库的原始长篇 README，而是改成面向本地开发、复现和二次实验的说明文档。
 
-[Nicolas Carion](https://www.nicolascarion.com/)\*,
-[Laura Gustafson](https://scholar.google.com/citations?user=c8IpF9gAAAAJ&hl=en)\*,
-[Yuan-Ting Hu](https://scholar.google.com/citations?user=E8DVVYQAAAAJ&hl=en)\*,
-[Shoubhik Debnath](https://scholar.google.com/citations?user=fb6FOfsAAAAJ&hl=en)\*,
-[Ronghang Hu](https://ronghanghu.com/)\*,
-[Didac Suris](https://www.didacsuris.com/)\*,
-[Chaitanya Ryali](https://scholar.google.com/citations?user=4LWx24UAAAAJ&hl=en)\*,
-[Kalyan Vasudev Alwala](https://scholar.google.co.in/citations?user=m34oaWEAAAAJ&hl=en)\*,
-[Haitham Khedr](https://hkhedr.com/)\*, Andrew Huang,
-[Jie Lei](https://jayleicn.github.io/),
-[Tengyu Ma](https://scholar.google.com/citations?user=VeTSl0wAAAAJ&hl=en),
-[Baishan Guo](https://scholar.google.com/citations?user=BC5wDu8AAAAJ&hl=en),
-Arpit Kalla, [Markus Marks](https://damaggu.github.io/),
-[Joseph Greer](https://scholar.google.com/citations?user=guL96CkAAAAJ&hl=en),
-Meng Wang, [Peize Sun](https://peizesun.github.io/),
-[Roman Rädle](https://scholar.google.com/citations?user=Tpt57v0AAAAJ&hl=en),
-[Triantafyllos Afouras](https://www.robots.ox.ac.uk/~afourast/),
-[Effrosyni Mavroudi](https://scholar.google.com/citations?user=vYRzGGEAAAAJ&hl=en),
-[Katherine Xu](https://k8xu.github.io/)°,
-[Tsung-Han Wu](https://patrickthwu.com/)°,
-[Yu Zhou](https://yu-bryan-zhou.github.io/)°,
-[Liliane Momeni](https://scholar.google.com/citations?user=Lb-KgVYAAAAJ&hl=en)°,
-[Rishi Hazra](https://rishihazra.github.io/)°,
-[Shuangrui Ding](https://mark12ding.github.io/)°,
-[Sagar Vaze](https://sgvaze.github.io/)°,
-[Francois Porcher](https://scholar.google.com/citations?user=LgHZ8hUAAAAJ&hl=en)°,
-[Feng Li](https://fengli-ust.github.io/)°,
-[Siyuan Li](https://siyuanliii.github.io/)°,
-[Aishwarya Kamath](https://ashkamath.github.io/)°,
-[Ho Kei Cheng](https://hkchengrex.com/)°,
-[Piotr Dollar](https://pdollar.github.io/)†,
-[Nikhila Ravi](https://nikhilaravi.com/)†,
-[Kate Saenko](https://ai.bu.edu/ksaenko.html)†,
-[Pengchuan Zhang](https://pzzhang.github.io/pzzhang/)†,
-[Christoph Feichtenhofer](https://feichtenhofer.github.io/)†
+SAM3（Segment Anything with Concepts）是 Meta 发布的统一图像/视频可提示分割模型，支持：
 
-\* core contributor, ° intern, † project lead, order is random within groups
+- 文本提示分割
+- 点、框、mask 等几何提示
+- 视频目标分割与跟踪
+- 基于概念的开放词汇实例检索与分割
 
-[[`Paper`](https://ai.meta.com/research/publications/sam-3-segment-anything-with-concepts/)]
-[[`Project`](https://ai.meta.com/sam3)]
-[[`Demo`](https://segment-anything.com/)]
-[[`Blog`](https://ai.meta.com/blog/segment-anything-model-3/)]
-[[`BibTeX`](#citing-sam-3)]
+官方资源：
 
-![SAM 3 architecture](assets/model_diagram.png?raw=true) SAM 3 is a unified foundation model for promptable segmentation in images and videos. It can detect, segment, and track objects using text or visual prompts such as points, boxes, and masks. Compared to its predecessor [SAM 2](https://github.com/facebookresearch/sam2), SAM 3 introduces the ability to exhaustively segment all instances of an open-vocabulary concept specified by a short text phrase or exemplars. Unlike prior work, SAM 3 can handle a vastly larger set of open-vocabulary prompts. It achieves 75-80% of human performance on our new [SA-CO benchmark](https://github.com/facebookresearch/sam3?tab=readme-ov-file#sa-co-dataset) which contains 270K unique concepts, over 50 times more than existing benchmarks.
+- 论文：[SAM 3 Paper](https://ai.meta.com/research/publications/sam-3-segment-anything-with-concepts/)
+- 项目页：[SAM 3 Project](https://ai.meta.com/sam3)
+- 在线演示：[Segment Anything Demo](https://segment-anything.com/)
+- 官方仓库：[facebookresearch/sam3](https://github.com/facebookresearch/sam3)
+- 权重仓库：[Hugging Face - facebook/sam3](https://huggingface.co/facebook/sam3)
 
-This breakthrough is driven by an innovative data engine that has automatically annotated over 4 million unique concepts, creating the largest high-quality open-vocabulary segmentation dataset to date. In addition, SAM 3 introduces a new model architecture featuring a presence token that improves discrimination between closely related text prompts (e.g., “a player in white” vs. “a player in red”), as well as a decoupled detector–tracker design that minimizes task interference and scales efficiently with data.
+## 这个仓库里有什么
 
-<p align="center">
-  <img src="assets/dog.gif" width=380 />
-  <img src="assets/player.gif" width=380 />
-</p>
+本仓库是一个完整的 `sam3` 代码库，除了基础推理代码，还包含训练、评测、示例 Notebook 和若干实验脚本。
 
-## Installation
+主要目录如下：
 
-### Prerequisites
+```text
+sam3/                  核心模型、推理、训练与评测代码
+examples/              官方示例 notebook
+scripts/               数据处理、评测、memory/token bank 等实验脚本
+assets/                文档素材、示例图片和视频
+README_TRAIN.md        训练补充说明
+pyproject.toml         包依赖与可选 extras
+```
 
-- Python 3.12 or higher
-- PyTorch 2.7 or higher
-- CUDA-compatible GPU with CUDA 12.6 or higher
+如果你只是想快速跑通推理，重点看：
 
-1. **Create a new Conda environment:**
+- `sam3/model_builder.py`
+- `sam3/model/sam3_image_processor.py`
+- `sam3/model/sam3_video_predictor.py`
+- `examples/*.ipynb`
+
+如果你要做训练或数据实验，重点看：
+
+- `sam3/train/`
+- `README_TRAIN.md`
+- `scripts/`
+
+## 环境要求
+
+从 `pyproject.toml` 看，项目元数据声明支持 `Python >= 3.8`。但如果你希望尽量贴近官方使用环境，建议：
+
+- Python 3.10 到 3.12
+- PyTorch 2.7.x
+- CUDA 12.6（GPU 推理/训练时）
+
+推荐用 Conda 单独建环境：
 
 ```bash
 conda create -n sam3 python=3.12
-conda deactivate
 conda activate sam3
 ```
 
-2. **Install PyTorch with CUDA support:**
+安装 PyTorch（示例为 CUDA 12.6）：
 
 ```bash
 pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
 
-3. **Clone the repository and install the package:**
+安装当前仓库：
 
 ```bash
-git clone https://github.com/facebookresearch/sam3.git
-cd sam3
 pip install -e .
 ```
 
-4. **Install additional dependencies for example notebooks or development:**
+按需安装额外依赖：
 
 ```bash
-# For running example notebooks
+# notebook 示例
 pip install -e ".[notebooks]"
 
-# For development
-pip install -e ".[train,dev]"
+# 训练相关
+pip install -e ".[train]"
+
+# 开发和测试工具
+pip install -e ".[dev]"
 ```
 
-## Getting Started
+如果你本地是 CPU 环境，也可以先只安装 CPU 版 PyTorch 验证导包是否正常，但实际推理和训练默认都更偏向 GPU 使用。
 
-⚠️ Before using SAM 3, please request access to the checkpoints on the SAM 3
-Hugging Face [repo](https://huggingface.co/facebook/sam3). Once accepted, you
-need to be authenticated to download the checkpoints. You can do this by running
-the following [steps](https://huggingface.co/docs/huggingface_hub/en/quick-start#authentication)
-(e.g. `hf auth login` after generating an access token.)
+## 权重下载
 
-### Basic Usage
+`build_sam3_image_model()` 和 `build_sam3_video_model()` 默认会在没有传入 `checkpoint_path` 时尝试从 Hugging Face 下载权重。
+
+首次使用前请先确认：
+
+1. 你已经获得 `facebook/sam3` 模型访问权限
+2. 本地已经执行过 Hugging Face 登录
+
+```bash
+hf auth login
+```
+
+如果你已经手动下载好权重，也可以显式传入：
 
 ```python
-import torch
-#################################### For Image ####################################
+checkpoint_path="/path/to/sam3.pt"
+```
+
+并设置：
+
+```python
+load_from_HF=False
+```
+
+## 快速开始
+
+### 图像推理
+
+最基础的图像文本提示推理方式如下：
+
+```python
 from PIL import Image
 from sam3.model_builder import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
-# Load the model
+
 model = build_sam3_image_model()
 processor = Sam3Processor(model)
-# Load an image
-image = Image.open("<YOUR_IMAGE_PATH.jpg>")
-inference_state = processor.set_image(image)
-# Prompt the model with text
-output = processor.set_text_prompt(state=inference_state, prompt="<YOUR_TEXT_PROMPT>")
 
-# Get the masks, bounding boxes, and scores
-masks, boxes, scores = output["masks"], output["boxes"], output["scores"]
+image = Image.open("demo.jpg")
+state = processor.set_image(image)
+state = processor.set_text_prompt("a red car", state)
 
-#################################### For Video ####################################
+masks = state["masks"]
+boxes = state["boxes"]
+scores = state["scores"]
+```
 
+说明：
+
+- `set_image()` 会先提取视觉 backbone 特征
+- `set_text_prompt()` 会执行文本提示分割
+- 输出结果保存在 `state` 中，常用字段是 `masks`、`boxes`、`scores`
+
+### 几何提示
+
+除了文本提示，你也可以继续叠加几何框提示：
+
+```python
+state = processor.add_geometric_prompt(
+    box=[0.5, 0.5, 0.3, 0.3],  # cx, cy, w, h，归一化到 [0, 1]
+    label=True,
+    state=state,
+)
+```
+
+### 视频推理
+
+视频接口主要通过 `handle_request()` / `handle_stream_request()` 组织会话。
+
+```python
 from sam3.model_builder import build_sam3_video_predictor
 
-video_predictor = build_sam3_video_predictor()
-video_path = "<YOUR_VIDEO_PATH>" # a JPEG folder or an MP4 video file
-# Start a session
-response = video_predictor.handle_request(
-    request=dict(
-        type="start_session",
-        resource_path=video_path,
-    )
+predictor = build_sam3_video_predictor()
+
+session = predictor.handle_request(
+    {
+        "type": "start_session",
+        "resource_path": "assets/videos/bedroom.mp4",
+    }
 )
-response = video_predictor.handle_request(
-    request=dict(
-        type="add_prompt",
-        session_id=response["session_id"],
-        frame_index=0, # Arbitrary frame index
-        text="<YOUR_TEXT_PROMPT>",
-    )
+
+response = predictor.handle_request(
+    {
+        "type": "add_prompt",
+        "session_id": session["session_id"],
+        "frame_index": 0,
+        "text": "person",
+    }
 )
-output = response["outputs"]
+
+outputs = response["outputs"]
 ```
 
-## Examples
+`resource_path` 支持：
 
-The `examples` directory contains notebooks demonstrating how to use SAM3 with
-various types of prompts:
+- MP4 视频文件
+- JPEG 帧目录
+- 单张图片
 
-- [`sam3_image_predictor_example.ipynb`](examples/sam3_image_predictor_example.ipynb)
-  : Demonstrates how to prompt SAM 3 with text and visual box prompts on images.
-- [`sam3_video_predictor_example.ipynb`](examples/sam3_video_predictor_example.ipynb)
-  : Demonstrates how to prompt SAM 3 with text prompts on videos, and doing
-  further interactive refinements with points.
-- [`sam3_image_batched_inference.ipynb`](examples/sam3_image_batched_inference.ipynb)
-  : Demonstrates how to run batched inference with SAM 3 on images.
-- [`sam3_agent.ipynb`](examples/sam3_agent.ipynb): Demonsterates the use of SAM
-  3 Agent to segment complex text prompt on images.
-- [`saco_gold_silver_vis_example.ipynb`](examples/saco_gold_silver_vis_example.ipynb)
-  : Shows a few examples from SA-Co image evaluation set.
-- [`saco_veval_vis_example.ipynb`](examples/saco_veval_vis_example.ipynb) :
-  Shows a few examples from SA-Co video evaluation set.
+## 示例 Notebook
 
-There are additional notebooks in the examples directory that demonstrate how to
-use SAM 3 for interactive instance segmentation in images and videos (SAM 1/2
-tasks), or as a tool for an MLLM, and how to run evaluations on the SA-Co
-dataset.
+`examples/` 目录已经覆盖了大多数常见用法：
 
-To run the Jupyter notebook examples:
+- `examples/sam3_image_predictor_example.ipynb`：图像文本/框提示推理
+- `examples/sam3_video_predictor_example.ipynb`：视频提示与传播
+- `examples/sam3_image_batched_inference.ipynb`：图像批量推理
+- `examples/sam3_agent.ipynb`：复杂文本提示示例
+- `examples/sam3_image_interactive.ipynb`：交互式图像分割
+- `examples/sam3_for_sam1_task_example.ipynb`：兼容 SAM1 风格任务
+- `examples/sam3_for_sam2_video_task_example.ipynb`：兼容 SAM2 风格视频任务
+- `examples/saco_gold_silver_vis_example.ipynb`：SA-CO 图像可视化
+- `examples/saco_gold_silver_eval_example.ipynb`：SA-CO 图像评测
+- `examples/saco_veval_vis_example.ipynb`：SA-CO 视频可视化
+- `examples/saco_veval_eval_example.ipynb`：SA-CO 视频评测
+
+启动 notebook：
 
 ```bash
-# Make sure you have the notebooks dependencies installed
 pip install -e ".[notebooks]"
-
-# Start Jupyter notebook
-jupyter notebook examples/sam3_image_predictor_example.ipynb
+jupyter notebook
 ```
 
-## Model
+## 训练
 
-SAM 3 consists of a detector and a tracker that share a vision encoder. It has 848M parameters. The
-detector is a DETR-based model conditioned on text, geometry, and image
-exemplars. The tracker inherits the SAM 2 transformer encoder-decoder
-architecture, supporting video segmentation and interactive refinement.
+训练入口在：
 
-## Image Results
+```text
+sam3/train/train.py
+```
 
-<div align="center">
-<table style="min-width: 80%; border: 2px solid #ddd; border-collapse: collapse">
-  <thead>
-    <tr>
-      <th rowspan="3" style="border-right: 2px solid #ddd; padding: 12px 20px">Model</th>
-      <th colspan="3" style="text-align: center; border-right: 2px solid #ddd; padding: 12px 20px">Instance Segmentation</th>
-      <th colspan="5" style="text-align: center; padding: 12px 20px">Box Detection</th>
-    </tr>
-    <tr>
-      <th colspan="2" style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">LVIS</th>
-      <th style="text-align: center; border-right: 2px solid #ddd; padding: 12px 20px">SA-Co/Gold</th>
-      <th colspan="2" style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">LVIS</th>
-      <th colspan="2" style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">COCO</th>
-      <th style="text-align: center; padding: 12px 20px">SA-Co/Gold</th>
-    </tr>
-    <tr>
-      <th style="text-align: center; padding: 12px 20px">cgF1</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">AP</th>
-      <th style="text-align: center; border-right: 2px solid #ddd; padding: 12px 20px">cgF1</th>
-      <th style="text-align: center; padding: 12px 20px">cgF1</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">AP</th>
-      <th style="text-align: center; padding: 12px 20px">AP</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">AP<sub>o</sub>
-</th>
-      <th style="text-align: center; padding: 12px 20px">cgF1</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">Human</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 2px solid #ddd; padding: 10px 20px">72.8</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; padding: 10px 20px">74.0</td>
-    </tr>
-    <tr>
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">OWLv2*</td>
-      <td style="text-align: center; padding: 10px 20px; color: #999">29.3</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px; color: #999">43.4</td>
-      <td style="text-align: center; border-right: 2px solid #ddd; padding: 10px 20px">24.6</td>
-      <td style="text-align: center; padding: 10px 20px; color: #999">30.2</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px; color: #999">45.5</td>
-      <td style="text-align: center; padding: 10px 20px">46.1</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">23.9</td>
-      <td style="text-align: center; padding: 10px 20px">24.5</td>
-    </tr>
-    <tr>
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">DINO-X</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">38.5</td>
-      <td style="text-align: center; border-right: 2px solid #ddd; padding: 10px 20px">21.3</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">52.4</td>
-      <td style="text-align: center; padding: 10px 20px">56.0</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; padding: 10px 20px">22.5</td>
-    </tr>
-    <tr>
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">Gemini 2.5</td>
-      <td style="text-align: center; padding: 10px 20px">13.4</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 2px solid #ddd; padding: 10px 20px">13.0</td>
-      <td style="text-align: center; padding: 10px 20px">16.1</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; padding: 10px 20px">14.4</td>
-    </tr>
-    <tr style="border-top: 2px solid #b19c9cff">
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">SAM 3</td>
-      <td style="text-align: center; padding: 10px 20px">37.2</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">48.5</td>
-      <td style="text-align: center; border-right: 2px solid #ddd; padding: 10px 20px">54.1</td>
-      <td style="text-align: center; padding: 10px 20px">40.6</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">53.6</td>
-      <td style="text-align: center; padding: 10px 20px">56.4</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">55.7</td>
-      <td style="text-align: center; padding: 10px 20px">55.7</td>
-    </tr>
-  </tbody>
-</table>
-
-<p style="text-align: center; margin-top: 10px; font-size: 0.9em; color: #ddd;">* Partially trained on LVIS, AP<sub>o</sub> refers to COCO-O accuracy</p>
-
-</div>
-
-## Video Results
-
-<div align="center">
-<table style="min-width: 80%; border: 2px solid #ddd; border-collapse: collapse">
-  <thead>
-    <tr>
-      <th rowspan="2" style="border-right: 2px solid #ddd; padding: 12px 20px">Model</th>
-      <th colspan="2" style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">SA-V test</th>
-      <th colspan="2" style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">YT-Temporal-1B test</th>
-      <th colspan="2" style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">SmartGlasses test</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">LVVIS test</th>
-      <th style="text-align: center; padding: 12px 20px">BURST test</th>
-    </tr>
-    <tr>
-      <th style="text-align: center; padding: 12px 20px">cgF1</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">pHOTA</th>
-      <th style="text-align: center; padding: 12px 20px">cgF1</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">pHOTA</th>
-      <th style="text-align: center; padding: 12px 20px">cgF1</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">pHOTA</th>
-      <th style="text-align: center; border-right: 1px solid #eee; padding: 12px 20px">mAP</th>
-      <th style="text-align: center; padding: 12px 20px">HOTA</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">Human</td>
-      <td style="text-align: center; padding: 10px 20px">53.1</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">70.5</td>
-      <td style="text-align: center; padding: 10px 20px">71.2</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">78.4</td>
-      <td style="text-align: center; padding: 10px 20px">58.5</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">72.3</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">-</td>
-      <td style="text-align: center; padding: 10px 20px">-</td>
-    </tr>
-    <tr style="border-top: 2px solid #b19c9cff">
-      <td style="border-right: 2px solid #ddd; padding: 10px 20px">SAM 3</td>
-      <td style="text-align: center; padding: 10px 20px">30.3</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">58.0</td>
-      <td style="text-align: center; padding: 10px 20px">50.8</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">69.9</td>
-      <td style="text-align: center; padding: 10px 20px">36.4</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">63.6</td>
-      <td style="text-align: center; border-right: 1px solid #eee; padding: 10px 20px">36.3</td>
-      <td style="text-align: center; padding: 10px 20px">44.5</td>
-    </tr>
-  </tbody>
-</table>
-</div>
-
-## SA-Co Dataset
-
-We release 2 image benchmarks, [SA-Co/Gold](scripts/eval/gold/README.md) and
-[SA-Co/Silver](scripts/eval/silver/README.md), and a video benchmark
-[SA-Co/VEval](scripts/eval/veval/README.md). The datasets contain images (or videos) with annotated noun phrases. Each image/video and noun phrase pair is annotated with instance masks and unique IDs of each object matching the phrase. Phrases that have no matching objects (negative prompts) have no masks, shown in red font in the figure. See the linked READMEs for more details on how to download and run evaluations on the datasets.
-
-* HuggingFace host: [SA-Co/Gold](https://huggingface.co/datasets/facebook/SACo-Gold), [SA-Co/Silver](https://huggingface.co/datasets/facebook/SACo-Silver) and [SA-Co/VEval](https://huggingface.co/datasets/facebook/SACo-VEval)
-* Roboflow host: [SA-Co/Gold](https://universe.roboflow.com/sa-co-gold), [SA-Co/Silver](https://universe.roboflow.com/sa-co-silver) and [SA-Co/VEval](https://universe.roboflow.com/sa-co-veval)
-
-![SA-Co dataset](assets/sa_co_dataset.jpg?raw=true)
-
-## Development
-
-To set up the development environment:
+安装训练依赖：
 
 ```bash
-pip install -e ".[dev,train]"
+pip install -e ".[train]"
 ```
 
-To format the code:
+示例：
 
 ```bash
-ufmt format .
+# Roboflow 100-VL
+python sam3/train/train.py -c configs/roboflow_v100/roboflow_v100_full_ft_100_images.yaml
+
+# ODinW13
+python sam3/train/train.py -c configs/odinw13/odinw_text_only_train.yaml
 ```
 
-## Contributing
+训练配置位于：
 
-See [contributing](CONTRIBUTING.md) and the
-[code of conduct](CODE_OF_CONDUCT.md).
-
-## License
-
-This project is licensed under the SAM License - see the [LICENSE](LICENSE) file
-for details.
-
-## Acknowledgements
-
-We would like to thank the following people for their contributions to the SAM 3 project: Alex He, Alexander Kirillov,
-Alyssa Newcomb, Ana Paula Kirschner Mofarrej, Andrea Madotto, Andrew Westbury, Ashley Gabriel, Azita Shokpour,
-Ben Samples, Bernie Huang, Carleigh Wood, Ching-Feng Yeh, Christian Puhrsch, Claudette Ward, Daniel Bolya,
-Daniel Li, Facundo Figueroa, Fazila Vhora, George Orlin, Hanzi Mao, Helen Klein, Hu Xu, Ida Cheng, Jake Kinney,
-Jiale Zhi, Jo Sampaio, Joel Schlosser, Justin Johnson, Kai Brown, Karen Bergan, Karla Martucci, Kenny Lehmann,
-Maddie Mintz, Mallika Malhotra, Matt Ward, Michelle Chan, Michelle Restrepo, Miranda Hartley, Muhammad Maaz,
-Nisha Deo, Peter Park, Phillip Thomas, Raghu Nayani, Rene Martinez Doehner, Robbie Adkins, Ross Girshik, Sasha
-Mitts, Shashank Jain, Spencer Whitehead, Ty Toledano, Valentin Gabeur, Vincent Cho, Vivian Lee, William Ngan,
-Xuehai He, Yael Yungster, Ziqi Pang, Ziyi Dou, Zoe Quake.
-
-## Citing SAM 3
-
-If you use SAM 3 or the SA-Co dataset in your research, please use the following BibTeX entry.
-
-```bibtex
-@misc{carion2025sam3segmentconcepts,
-      title={SAM 3: Segment Anything with Concepts},
-      author={Nicolas Carion and Laura Gustafson and Yuan-Ting Hu and Shoubhik Debnath and Ronghang Hu and Didac Suris and Chaitanya Ryali and Kalyan Vasudev Alwala and Haitham Khedr and Andrew Huang and Jie Lei and Tengyu Ma and Baishan Guo and Arpit Kalla and Markus Marks and Joseph Greer and Meng Wang and Peize Sun and Roman Rädle and Triantafyllos Afouras and Effrosyni Mavroudi and Katherine Xu and Tsung-Han Wu and Yu Zhou and Liliane Momeni and Rishi Hazra and Shuangrui Ding and Sagar Vaze and Francois Porcher and Feng Li and Siyuan Li and Aishwarya Kamath and Ho Kei Cheng and Piotr Dollár and Nikhila Ravi and Kate Saenko and Pengchuan Zhang and Christoph Feichtenhofer},
-      year={2025},
-      eprint={2511.16719},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2511.16719},
-}
+```text
+sam3/train/configs/
 ```
-# MedDomainSAM3
+
+更多细节见：[README_TRAIN.md](README_TRAIN.md)
+
+## 医疗实验脚本
+
+这个仓库在 `scripts/` 下额外实现了一条面向医疗分割实验的 memory 路线，主要围绕以下三类机制：
+
+- `static memory`：先离线构建 memory bank，推理时按图像/文本相似度检索并注入 prompt
+- `free memory tokens`：冻结 SAM3 主体，只学习一组可训练 memory token
+- `prompt token bank`：为不同 prompt 维护不同 token 组，按 prompt 路由使用
+
+这部分不是官方原始 README 的内容，而是当前仓库最值得补充说明的实验入口。
+
+### 数据目录约定
+
+单站点脚本默认使用下面这种目录结构：
+
+```text
+<site>/
+├── data_npy/          # 训练图像
+├── label_npy/         # 训练 mask
+├── val_data_npy/      # 验证图像
+└── val_label_npy/     # 验证 mask
+```
+
+大部分脚本同时支持常见图像格式和 `.npy`。如果使用 `.npy`，脚本会自动把单通道或浮点数组转成可供模型处理的 RGB 输入。
+
+### 1. Static Memory
+
+相关脚本：
+
+- `scripts/build_static_memory_bank.py`
+- `scripts/eval_medical_static_memory.py`
+- `scripts/run_static_memory.sh`
+- `scripts/run_federated_static_*memory.py`
+
+核心思路：
+
+1. 用 tracker 编码支持样本的图像与 mask
+2. 提取 `memory_features`、`memory_pos_enc`、`memory_keys`
+3. 可选提取 `memory_text_keys`
+4. 保存成一个离线 `static_memory_bank.pt`
+5. 推理时检索 top-k memory，并以 prompt 的形式注入模型
+
+这个 bank 还支持 prototype 压缩：
+
+- `--prototype-count`
+- `--prototype-grouping {global,per_text}`
+- `--prototype-iters`
+
+最小流程：
+
+```bash
+# 1) 构建 static memory bank
+python scripts/build_static_memory_bank.py \
+  --image-dir /path/to/site/data_npy \
+  --mask-dir /path/to/site/label_npy \
+  --output-path /path/to/static_memory_bank.pt \
+  --checkpoint-path /path/to/sam3.pt \
+  --default-text-prompt "prostate" \
+  --prototype-count 16 \
+  --prototype-grouping global
+
+# 2) 评估 baseline vs static memory
+python scripts/eval_medical_static_memory.py \
+  --image-dir /path/to/site/val_data_npy \
+  --mask-dir /path/to/site/val_label_npy \
+  --checkpoint-path /path/to/sam3.pt \
+  --static-memory-bank-path /path/to/static_memory_bank.pt \
+  --output-dir /path/to/eval_out \
+  --text-prompt "prostate" \
+  --static-memory-topk 1 \
+  --no-object-threshold 0.2 \
+  --memory-trigger-threshold 0.8 \
+  --save-predictions
+```
+
+评测逻辑不是“永远启用 memory”，而是带一个简单 gate：
+
+- baseline 分数低于 `--no-object-threshold`：直接判空
+- baseline 分数高于 `--memory-trigger-threshold`：直接沿用 baseline
+- 只有中间不确定区间才触发 memory refine
+
+### 2. Free Memory Tokens
+
+相关脚本：
+
+- `scripts/train_free_memory_tokens.py`
+- `scripts/train_memory_token.sh`
+- `scripts/eval_medical_static_memory.py`
+- `scripts/train_federated_free_memory_tokens_fedavg.py`
+- `scripts/eval_federated_free_memory_tokens_fedavg.py`
+- `scripts/fed_memory_tokens.sh`
+
+核心思路：
+
+- 不构建离线 bank
+- 直接在冻结的 SAM3 上训练一组可学习 token
+- 只更新 `memory_prompt_builder`
+
+训练损失由几部分组成：
+
+- Dice loss
+- BCE loss
+- token L2 regularization
+- token diversity regularization
+
+最小流程：
+
+```bash
+# 1) 训练 free memory tokens
+python scripts/train_free_memory_tokens.py \
+  --image-dir /path/to/site/data_npy \
+  --mask-dir /path/to/site/label_npy \
+  --output-path /path/to/free_memory_tokens.pt \
+  --checkpoint-path /path/to/sam3.pt \
+  --text-prompt "prostate" \
+  --num-tokens 4 \
+  --epochs 5 \
+  --lr 1e-2
+
+# 2) 用同一个评测脚本加载 free memory token
+python scripts/eval_medical_static_memory.py \
+  --image-dir /path/to/site/val_data_npy \
+  --mask-dir /path/to/site/val_label_npy \
+  --checkpoint-path /path/to/sam3.pt \
+  --free-memory-ckpt /path/to/free_memory_tokens.pt \
+  --output-dir /path/to/eval_free_memory \
+  --text-prompt "prostate" \
+  --free-memory-num-tokens 4
+```
+
+如果要做跨站点实验，这里还实现了 FedAvg 版本：各站点本地训练 free tokens，再在中心端做参数平均。
+
+### 3. Prompt Token Bank
+
+相关脚本：
+
+- `scripts/train_prompt_token_bank.py`
+- `scripts/eval_prompt_token_bank.py`
+- `scripts/run_token_bank.sh`
+
+这条线适合多 prompt 混合训练。它不是所有样本共享同一组 token，而是：
+
+- 每个 prompt 映射一个 `prompt_id`
+- 每个 `prompt_id` 对应一组 token
+- 训练和推理时按 prompt 路由到对应 token 组
+
+训练数据由 `datasets.json` 驱动，格式类似：
+
+```json
+[
+  {
+    "image_dir": "/path/to/site_a/images",
+    "mask_dir": "/path/to/site_a/masks",
+    "prompt": "prostate"
+  },
+  {
+    "image_dir": "/path/to/site_b/images",
+    "mask_dir": "/path/to/site_b/masks",
+    "prompt": "brain tumor"
+  }
+]
+```
+
+训练示例：
+
+```bash
+python scripts/train_prompt_token_bank.py \
+  --datasets-json /path/to/datasets.json \
+  --output-path /path/to/prompt_token_bank.pt \
+  --checkpoint-path /path/to/sam3.pt \
+  --tokens-per-prompt 4 \
+  --loader-mode sequential \
+  --epochs 5 \
+  --lr 1e-2
+```
+
+评估示例：
+
+```bash
+python scripts/eval_prompt_token_bank.py \
+  --image-dir /path/to/val_images \
+  --mask-dir /path/to/val_masks \
+  --checkpoint-path /path/to/sam3.pt \
+  --token-bank-ckpt /path/to/prompt_token_bank.pt \
+  --output-dir /path/to/eval_prompt_token_bank \
+  --text-prompt "prostate lesion" \
+  --no-object-threshold 0.2 \
+  --memory-trigger-threshold 0.8
+```
+
+### 4. Hybrid Memory Ablation
+
+相关脚本：
+
+- `scripts/eval_memory_hybrid_*ablation.py`
+- `scripts/run_token_bank.sh`
+- `scripts/run_site_memory_auto.py`
+
+这里实现了 baseline、static memory、free memory 以及 hybrid 融合对比。
+
+`hybrid` 的默认思路是：
+
+- 先分别得到 static / free 两条分支的概率图
+- 再用简单平均或按分数加权做融合
+
+可选参数：
+
+- `--hybrid-fusion {avg,score_weighted}`
+- `--hybrid-score-temperature`
+- `--use-gate` / `--disable-gate`
+
+示例：
+
+```bash
+python "scripts/eval_memory_hybrid_*ablation.py" \
+  --image-dir /path/to/query_images \
+  --mask-dir /path/to/query_masks \
+  --checkpoint-path /path/to/sam3.pt \
+  --static-memory-bank-path /path/to/static_memory_bank.pt \
+  --free-memory-ckpt /path/to/free_memory_tokens.pt \
+  --output-dir /path/to/eval_hybrid \
+  --text-prompt "prostate" \
+  --use-gate \
+  --hybrid-fusion score_weighted
+```
+
+### 5. 单站点自动化流程
+
+`scripts/run_site_memory_auto.py` 把单站点实验串成一条完整流水线：
+
+1. 在 train split 上训练 free memory tokens
+2. 从 val split 中切出一小部分 support set
+3. 用 support set 构建 static memory bank
+4. 在剩余 val query 上做 hybrid ablation
+
+默认使用：
+
+- `val_support_ratio=0.05`
+- 随机划分 support/query
+- 最终输出 `run_manifest.json` 和评测 `metrics.json`
+
+示例：
+
+```bash
+python scripts/run_site_memory_auto.py \
+  --dataset-root /path/to/dataset_root \
+  --site BIDMC \
+  --checkpoint-path /path/to/sam3.pt \
+  --output-root /path/to/output \
+  --text-prompt "prostate"
+```
+
+注意：当前仓库里有两个脚本文件名本身包含字面量 `*`：
+
+- `scripts/eval_memory_hybrid_*ablation.py`
+- `scripts/run_federated_static_*memory.py`
+
+在 shell 里调用它们时，建议像上面示例一样用引号包住整个路径。
+
+### 6. 当前 `scripts/` 的定位
+
+如果你只想复现基础能力，用 `examples/` 就够了。
+
+如果你要复现这个仓库当前最重要的二次实验，建议按下面顺序：
+
+1. `scripts/build_static_memory_bank.py`
+2. `scripts/eval_medical_static_memory.py`
+3. `scripts/train_free_memory_tokens.py`
+4. `scripts/eval_memory_hybrid_*ablation.py`
+5. `scripts/run_site_memory_auto.py`
+
+## 评测与实验脚本
+
+仓库里除了官方示例外，还保留了较多脚本化实验入口，主要在 `scripts/`：
+
+- `scripts/eval/`：评测相关脚本和说明
+- `scripts/build_static_memory_bank.py`：构建静态 memory bank
+- `scripts/train_free_memory_tokens.py`：训练 free memory tokens
+- `scripts/train_prompt_token_bank.py`：训练 prompt token bank
+- `scripts/eval_medical_static_memory.py`：医疗场景静态 memory 实验
+- `scripts/eval_memory_hybrid_*ablation.py`：baseline/static/free/hybrid 对比
+- `scripts/run_site_memory_auto.py`：单站点自动化实验流水线
+
+如果你准备在这个仓库里继续做实验，建议先通读一遍 `scripts/` 文件名，再决定是走 notebook 路线还是脚本路线。
+
+## 常见问题
+
+### 1. 为什么模型加载时会去 Hugging Face？
+
+因为 `build_sam3_image_model()` / `build_sam3_video_model()` 的默认参数里 `load_from_HF=True`，且在未传入本地 `checkpoint_path` 时会自动下载权重。
+
+### 2. `Sam3Processor` 默认为什么用 `cuda`？
+
+`Sam3Processor(model, device="cuda")` 的默认设备就是 `cuda`。如果你在 CPU 环境调试，需要手动传：
+
+```python
+processor = Sam3Processor(model, device="cpu")
+```
+
+### 3. 训练文档里有些路径为什么看起来像相对配置路径？
+
+训练脚本基于 Hydra 配置系统，命令里的 `-c configs/...yaml` 是相对于训练配置目录约定来写的。实际使用时建议以现有配置文件为模板改自己的数据路径和日志路径。
+
+## 建议的阅读顺序
+
+如果你第一次接手这个仓库，建议按下面顺序看：
+
+1. `README.md`
+2. `examples/sam3_image_predictor_example.ipynb`
+3. `sam3/model_builder.py`
+4. `sam3/model/sam3_image_processor.py`
+5. `README_TRAIN.md`
+6. `sam3/train/configs/`
+7. `scripts/build_static_memory_bank.py`
+8. `scripts/eval_medical_static_memory.py`
+
+## 致谢
+
+本仓库代码主体来自 Meta 官方 `SAM 3` 项目。当前 README 主要是为了让本地开发和协作更直接，不改变原始模型与论文归属。
