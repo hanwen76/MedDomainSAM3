@@ -1,0 +1,17 @@
+[
+  {
+    "image_dir": "/mnt/diskB/zhw/Prostate_82_256_JPG/siteA/images",
+    "mask_dir": "/mnt/diskB/zhw/Prostate_82_256_JPG/siteA/masks",
+    "prompt": "prostate lesion"
+  },
+  {
+    "image_dir": "/mnt/diskB/zhw/Prostate_82_256_JPG/siteB/images",
+    "mask_dir": "/mnt/diskB/zhw/Prostate_82_256_JPG/siteB/masks",
+    "prompt": "prostate lesion"
+  },
+  {
+    "image_dir": "/mnt/diskB/zhw/Bladder_256_JPG/siteC/images",
+    "mask_dir": "/mnt/diskB/zhw/Bladder_256_JPG/siteC/masks",
+    "prompt": "bladder lesion"
+  }
+]

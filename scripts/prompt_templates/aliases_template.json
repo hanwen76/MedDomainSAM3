@@ -1,0 +1,15 @@
+{
+  "prostate tumor": "prostate lesion",
+  "prostate mass": "prostate lesion",
+  "bladder tumor": "bladder lesion",
+  "liver tumor": "liver lesion",
+  "hepatic lesion": "liver lesion",
+  "renal lesion": "kidney lesion",
+  "kidney tumor": "kidney lesion",
+  "pulmonary nodule": "lung nodule",
+  "glioma core": "brain tumor core",
+  "tumor core": "brain tumor core",
+  "peritumoral edema": "brain edema",
+  "edema region": "brain edema",
+  "pancreas tumor": "pancreatic lesion"
+}

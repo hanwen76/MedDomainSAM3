@@ -1,0 +1,58 @@
+{
+  "prostate lesion": [
+    "small",
+    "low contrast",
+    "irregular boundary",
+    "peripheral zone",
+    "focal"
+  ],
+  "bladder lesion": [
+    "wall-adjacent",
+    "irregular contour",
+    "heterogeneous intensity",
+    "focal",
+    "non-uniform boundary"
+  ],
+  "liver lesion": [
+    "hypodense",
+    "round or oval",
+    "well-defined or mildly irregular boundary",
+    "focal",
+    "parenchyma-associated"
+  ],
+  "kidney lesion": [
+    "cortical or cortico-medullary",
+    "round or lobulated",
+    "heterogeneous intensity",
+    "focal",
+    "clear-to-irregular margin"
+  ],
+  "lung nodule": [
+    "small",
+    "round",
+    "solid or subsolid",
+    "well-circumscribed",
+    "parenchyma-associated"
+  ],
+  "brain tumor core": [
+    "heterogeneous",
+    "enhancing",
+    "irregular boundary",
+    "mass-like",
+    "focal"
+  ],
+  "brain edema": [
+    "diffuse",
+    "ill-defined boundary",
+    "non-enhancing",
+    "peritumoral",
+    "hyperintense-on-T2"
+  ],
+  "pancreatic lesion": [
+    "hypoenhancing",
+    "ill-defined boundary",
+    "focal",
+    "parenchyma-associated",
+    "heterogeneous"
+  ]
+}
