@@ -26,6 +26,7 @@ from eval_medical_static_memory import (
     predict_mask_with_text,
     resolve_text_prompt,
 )
+from prompt_system import PromptSystem
 
 
 class PromptTokenBank(nn.Module):
@@ -103,6 +104,23 @@ def parse_args():
         choices=["error", "baseline_only"],
         default="baseline_only",
     )
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+        help="How to normalize prompts before prompt-id lookup.",
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
     return parser.parse_args()
 
 
@@ -156,6 +174,10 @@ def main():
     num_prompts = int(cfg.get("num_prompts", len(prompt_to_id)))
     tokens_per_prompt = int(cfg.get("tokens_per_prompt", 1))
     lookup = build_prompt_id_lookup(prompt_to_id, mode=args.prompt_match_mode)
+    prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
 
     baseline_model, baseline_processor = load_image_model(args.checkpoint_path, args.device)
     memory_model, memory_processor = load_image_model(args.checkpoint_path, args.device)
@@ -180,6 +202,13 @@ def main():
         text_prompt = resolve_text_prompt(image_path.stem, metadata, args.text_prompt)
         if text_prompt is None:
             raise ValueError("text mode requires --text-prompt or --metadata-json")
+        text_prompt = prompt_system.transform_prompt(
+            text_prompt,
+            mode=args.prompt_system_mode,
+            topk_attrs=args.prompt_topk_attrs,
+            fmt=args.prompt_format,
+            separator=args.prompt_separator,
+        )
 
         gt_mask = load_mask_tensor(mask_path, args.image_size, args.device)
         baseline_pred, baseline_score = predict_mask_with_text(

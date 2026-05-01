@@ -32,6 +32,22 @@ def parse_args():
 
     parser.add_argument("--text-prompt", type=str, default=None)
     parser.add_argument("--metadata-json", type=Path, default=None)
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
 
     parser.add_argument("--val-support-ratio", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
@@ -140,6 +156,21 @@ def run_cmd(cmd):
     subprocess.run(cmd, check=True)
 
 
+def append_prompt_system_args(cmd, args):
+    if args.prompt_system_mode != "raw":
+        cmd.extend(["--prompt-system-mode", args.prompt_system_mode])
+    if args.attributes_json is not None:
+        cmd.extend(["--attributes-json", str(args.attributes_json)])
+    if args.aliases_json is not None:
+        cmd.extend(["--aliases-json", str(args.aliases_json)])
+    if args.prompt_topk_attrs is not None:
+        cmd.extend(["--prompt-topk-attrs", str(args.prompt_topk_attrs)])
+    if args.prompt_format is not None:
+        cmd.extend(["--prompt-format", args.prompt_format])
+    if args.prompt_separator is not None:
+        cmd.extend(["--prompt-separator", args.prompt_separator])
+
+
 def main():
     args = parse_args()
 
@@ -216,6 +247,7 @@ def main():
         train_cmd.extend(["--text-prompt", args.text_prompt])
     if args.metadata_json is not None:
         train_cmd.extend(["--metadata-json", str(args.metadata_json)])
+    append_prompt_system_args(train_cmd, args)
 
     build_static_cmd = [
         sys.executable,
@@ -243,6 +275,7 @@ def main():
         build_static_cmd.extend(["--default-text-prompt", args.text_prompt])
     if args.metadata_json is not None:
         build_static_cmd.extend(["--metadata-json", str(args.metadata_json)])
+    append_prompt_system_args(build_static_cmd, args)
 
     eval_cmd = [
         sys.executable,
@@ -282,6 +315,7 @@ def main():
         eval_cmd.extend(["--text-prompt", args.text_prompt])
     if args.metadata_json is not None:
         eval_cmd.extend(["--metadata-json", str(args.metadata_json)])
+    append_prompt_system_args(eval_cmd, args)
 
     run_cmd(train_cmd)
     run_cmd(build_static_cmd)

@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sam3.model_builder import build_tracker
+from prompt_system import PromptSystem
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".npy"}
@@ -33,6 +34,23 @@ def parse_args():
     parser.add_argument("--checkpoint-path", type=Path, default=None)
     parser.add_argument("--metadata-json", type=Path, default=None)
     parser.add_argument("--default-text-prompt", type=str, default=None)
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+        help="How to normalize prompts before memory bank construction.",
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--image-size", type=int, default=1008)
     parser.add_argument("--limit", type=int, default=None)
@@ -392,6 +410,10 @@ def main():
     enable_text_encoder = args.metadata_json is not None or args.default_text_prompt is not None
     tracker = load_tracker(args.checkpoint_path, args.device, enable_text_encoder=enable_text_encoder)
     image_transform = build_image_transform(args.image_size)
+    prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
 
     memory_features = []
     memory_pos_enc = []
@@ -403,6 +425,14 @@ def main():
         image_tensor = load_image_tensor(image_path, image_transform, args.device)
         mask_tensor = load_mask_tensor(mask_path, args.image_size, args.device)
         text_prompt = metadata_map.get(image_path.stem, args.default_text_prompt)
+        if text_prompt is not None:
+            text_prompt = prompt_system.transform_prompt(
+                text_prompt,
+                mode=args.prompt_system_mode,
+                topk_attrs=args.prompt_topk_attrs,
+                fmt=args.prompt_format,
+                separator=args.prompt_separator,
+            )
         feats, pos_enc, keys, text_keys = encode_pair(
             tracker,
             image_tensor,

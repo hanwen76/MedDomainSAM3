@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from sam3.model.data_misc import FindStage
 from sam3.model.geometry_encoders import Prompt
 from sam3.model_builder import build_sam3_image_model
+from prompt_system import PromptSystem
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".npy"}
@@ -108,6 +109,23 @@ def parse_args():
     parser.add_argument("--token-l2-weight", type=float, default=1e-4)
     parser.add_argument("--token-diversity-weight", type=float, default=1e-3)
     parser.add_argument("--prompt-diversity-weight", type=float, default=1e-3)
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+        help="How to normalize prompts before grouping and training.",
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
     return parser.parse_args()
 
 
@@ -263,11 +281,24 @@ def main():
     args = parse_args()
     datasets = parse_datasets_json(args.datasets_json)
     rng = random.Random(args.shuffle_seed)
+    prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
 
     prompt_to_id = {}
     for d in datasets:
-        if d["prompt"] not in prompt_to_id:
-            prompt_to_id[d["prompt"]] = len(prompt_to_id)
+        normalized_prompt = prompt_system.transform_prompt(
+            d["prompt"],
+            mode=args.prompt_system_mode,
+            topk_attrs=args.prompt_topk_attrs,
+            fmt=args.prompt_format,
+            separator=args.prompt_separator,
+        )
+        d["prompt_raw"] = d["prompt"]
+        d["prompt"] = normalized_prompt
+        if normalized_prompt not in prompt_to_id:
+            prompt_to_id[normalized_prompt] = len(prompt_to_id)
 
     samples = []
     dataset_samples = []
@@ -284,6 +315,7 @@ def main():
         for image_path, mask_path in pairs:
             item = {
                 "prompt": d["prompt"],
+                "prompt_raw": d["prompt_raw"],
                 "prompt_id": pid,
                 "image_path": image_path,
                 "mask_path": mask_path,
@@ -420,11 +452,17 @@ def main():
             "prompt_diversity_weight": args.prompt_diversity_weight,
             "loader_mode": args.loader_mode,
             "prompt_to_id": prompt_to_id,
+            "prompt_system_mode": args.prompt_system_mode,
+            "prompt_topk_attrs": args.prompt_topk_attrs,
+            "prompt_format": args.prompt_format,
+            "prompt_separator": args.prompt_separator,
+            "prompt_system": prompt_system.manifest(),
             "datasets": [
                 {
                     "image_dir": str(d["image_dir"]),
                     "mask_dir": str(d["mask_dir"]),
                     "prompt": d["prompt"],
+                    "prompt_raw": d["prompt_raw"],
                 }
                 for d in datasets
             ],

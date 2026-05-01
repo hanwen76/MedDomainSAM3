@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from sam3.model.sam3_image_processor import Sam3Processor
 from sam3.model_builder import build_sam3_image_model
 from sam3.model_builder import build_tracker
+from prompt_system import PromptSystem
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".npy"}
@@ -64,40 +65,100 @@ def parse_args():
     parser.add_argument("--free-memory-num-tokens", type=int, default=4)
     parser.add_argument("--save-predictions", action="store_true")
     parser.add_argument(
+        "--image-stem-suffix",
+        type=str,
+        default="",
+        help=(
+            "Optional suffix stripped from image filenames before pairing, "
+            "e.g. '_image' maps case001_image.npy to case001."
+        ),
+    )
+    parser.add_argument(
+        "--mask-stem-suffix",
+        type=str,
+        default="",
+        help=(
+            "Optional suffix stripped from mask filenames before pairing, "
+            "e.g. '_mask' maps case001_mask.npy to case001."
+        ),
+    )
+    parser.add_argument(
         "--extensions",
         nargs="+",
         default=sorted(IMAGE_SUFFIXES),
         help="Image suffixes to consider when pairing files by stem.",
     )
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+        help="How to normalize prompts before inference.",
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
     return parser.parse_args()
 
 
-def collect_pairs(image_dir: Path, mask_dir: Path, extensions):
+def normalize_stem(stem: str, suffix_to_strip: str):
+    if suffix_to_strip and stem.endswith(suffix_to_strip):
+        return stem[: -len(suffix_to_strip)]
+    return stem
+
+
+def collect_pairs(
+    image_dir: Path,
+    mask_dir: Path,
+    extensions,
+    image_stem_suffix: str = "",
+    mask_stem_suffix: str = "",
+):
     ext_set = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
     image_paths = {}
     for path in image_dir.rglob("*"):
         if path.is_file() and path.suffix.lower() in ext_set:
-            image_paths[path.stem] = path
+            key = normalize_stem(path.stem, image_stem_suffix)
+            if key in image_paths:
+                raise ValueError(
+                    f"Duplicate image key {key!r}: {image_paths[key]} and {path}. "
+                    "Adjust --image-stem-suffix or rename files."
+                )
+            image_paths[key] = path
+
+    mask_paths = {}
+    for path in mask_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in ext_set:
+            key = normalize_stem(path.stem, mask_stem_suffix)
+            if key in mask_paths:
+                raise ValueError(
+                    f"Duplicate mask key {key!r}: {mask_paths[key]} and {path}. "
+                    "Adjust --mask-stem-suffix or rename files."
+                )
+            mask_paths[key] = path
 
     pairs = []
     missing_masks = []
-    for stem, image_path in sorted(image_paths.items()):
-        mask_path = None
-        for ext in ext_set:
-            candidate = mask_dir / f"{stem}{ext}"
-            if candidate.exists():
-                mask_path = candidate
-                break
+    for key, image_path in sorted(image_paths.items()):
+        mask_path = mask_paths.get(key)
         if mask_path is None:
-            alt = list(mask_dir.rglob(f"{stem}.*"))
-            for candidate in alt:
-                if candidate.suffix.lower() in ext_set:
-                    mask_path = candidate
-                    break
-        if mask_path is None:
-            missing_masks.append(stem)
+            missing_masks.append(key)
             continue
         pairs.append((image_path, mask_path))
+    if missing_masks:
+        preview = ", ".join(missing_masks[:10])
+        suffix = " ..." if len(missing_masks) > 10 else ""
+        print(
+            f"Warning: skipped {len(missing_masks)} images without matched masks "
+            f"after stem normalization: {preview}{suffix}"
+        )
     return pairs, missing_masks
 
 
@@ -425,7 +486,13 @@ def summarize_metrics(results, key):
 
 def main():
     args = parse_args()
-    pairs, missing_masks = collect_pairs(args.image_dir, args.mask_dir, args.extensions)
+    pairs, missing_masks = collect_pairs(
+        args.image_dir,
+        args.mask_dir,
+        args.extensions,
+        image_stem_suffix=args.image_stem_suffix,
+        mask_stem_suffix=args.mask_stem_suffix,
+    )
     metadata_map = load_metadata(args.metadata_json)
     if args.limit is not None:
         pairs = pairs[: args.limit]
@@ -437,6 +504,10 @@ def main():
         (args.output_dir / "baseline").mkdir(parents=True, exist_ok=True)
         (args.output_dir / "static_memory").mkdir(parents=True, exist_ok=True)
 
+    prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
     image_transform = build_image_transform(args.image_size)
     baseline_tracker = None
     baseline_image_model = None
@@ -487,6 +558,14 @@ def main():
         image_tensor = load_image_tensor(image_path, image_transform, args.device)
         gt_mask = load_mask_tensor(mask_path, args.image_size, args.device)
         text_prompt = resolve_text_prompt(image_path.stem, metadata_map, args.text_prompt)
+        if text_prompt is not None:
+            text_prompt = prompt_system.transform_prompt(
+                text_prompt,
+                mode=args.prompt_system_mode,
+                topk_attrs=args.prompt_topk_attrs,
+                fmt=args.prompt_format,
+                separator=args.prompt_separator,
+            )
         point_inputs = (
             build_box_prompt(gt_mask, args.image_size)
             if args.prompt_mode == "box"

@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from sam3.model.data_misc import FindStage
 from sam3.model.geometry_encoders import Prompt
 from sam3.model_builder import build_sam3_image_model
+from prompt_system import PromptSystem
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".npy"}
@@ -42,6 +43,24 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
+        "--image-stem-suffix",
+        type=str,
+        default="",
+        help=(
+            "Optional suffix stripped from image filenames before pairing, "
+            "e.g. '_image' maps case001_image.npy to case001."
+        ),
+    )
+    parser.add_argument(
+        "--mask-stem-suffix",
+        type=str,
+        default="",
+        help=(
+            "Optional suffix stripped from mask filenames before pairing, "
+            "e.g. '_mask' maps case001_mask.npy to case001."
+        ),
+    )
+    parser.add_argument(
         "--token-l2-weight",
         type=float,
         default=1e-4,
@@ -53,24 +72,70 @@ def parse_args():
         default=1e-3,
         help="Diversity regularization weight to discourage token collapse.",
     )
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+        help="How to normalize prompts before training.",
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
     return parser.parse_args()
 
 
-def collect_pairs(image_dir: Path, mask_dir: Path):
+def normalize_stem(stem: str, suffix_to_strip: str):
+    if suffix_to_strip and stem.endswith(suffix_to_strip):
+        return stem[: -len(suffix_to_strip)]
+    return stem
+
+
+def collect_pairs(image_dir: Path, mask_dir: Path, image_stem_suffix: str = "", mask_stem_suffix: str = ""):
     image_paths = {}
     for path in image_dir.rglob("*"):
         if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
-            image_paths[path.stem] = path
+            key = normalize_stem(path.stem, image_stem_suffix)
+            if key in image_paths:
+                raise ValueError(
+                    f"Duplicate image key {key!r}: {image_paths[key]} and {path}. "
+                    "Adjust --image-stem-suffix or rename files."
+                )
+            image_paths[key] = path
+
+    mask_paths = {}
+    for path in mask_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
+            key = normalize_stem(path.stem, mask_stem_suffix)
+            if key in mask_paths:
+                raise ValueError(
+                    f"Duplicate mask key {key!r}: {mask_paths[key]} and {path}. "
+                    "Adjust --mask-stem-suffix or rename files."
+                )
+            mask_paths[key] = path
+
     pairs = []
-    for stem, image_path in sorted(image_paths.items()):
-        mask_path = None
-        for ext in IMAGE_SUFFIXES:
-            candidate = mask_dir / f"{stem}{ext}"
-            if candidate.exists():
-                mask_path = candidate
-                break
+    missing_masks = []
+    for key, image_path in sorted(image_paths.items()):
+        mask_path = mask_paths.get(key)
         if mask_path is not None:
             pairs.append((image_path, mask_path))
+        else:
+            missing_masks.append(key)
+    if missing_masks:
+        preview = ", ".join(missing_masks[:10])
+        suffix = " ..." if len(missing_masks) > 10 else ""
+        print(
+            f"Warning: skipped {len(missing_masks)} images without matched masks "
+            f"after stem normalization: {preview}{suffix}"
+        )
     return pairs
 
 
@@ -185,13 +250,22 @@ def resolve_text(stem: str, metadata: dict, default_text: str | None):
 
 def main():
     args = parse_args()
-    pairs = collect_pairs(args.image_dir, args.mask_dir)
+    pairs = collect_pairs(
+        args.image_dir,
+        args.mask_dir,
+        image_stem_suffix=args.image_stem_suffix,
+        mask_stem_suffix=args.mask_stem_suffix,
+    )
     if args.limit is not None:
         pairs = pairs[: args.limit]
     if not pairs:
         raise RuntimeError("No image/mask pairs found.")
 
     metadata = load_metadata(args.metadata_json)
+    prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
     transform = build_transform(args.image_size)
 
     model = build_sam3_image_model(
@@ -234,6 +308,13 @@ def main():
             image = load_image(image_path, transform, args.device)
             target = load_mask(mask_path, args.image_size, args.device)
             text_prompt = resolve_text(image_path.stem, metadata, args.text_prompt)
+            text_prompt = prompt_system.transform_prompt(
+                text_prompt,
+                mode=args.prompt_system_mode,
+                topk_attrs=args.prompt_topk_attrs,
+                fmt=args.prompt_format,
+                separator=args.prompt_separator,
+            )
 
             backbone_out = model.backbone.forward_image(image)
             backbone_out.update(model.backbone.forward_text([text_prompt], device=args.device))
@@ -285,6 +366,11 @@ def main():
             "image_size": args.image_size,
             "token_l2_weight": args.token_l2_weight,
             "token_diversity_weight": args.token_diversity_weight,
+            "prompt_system_mode": args.prompt_system_mode,
+            "prompt_topk_attrs": args.prompt_topk_attrs,
+            "prompt_format": args.prompt_format,
+            "prompt_separator": args.prompt_separator,
+            "prompt_system": prompt_system.manifest(),
         },
         "history": history,
     }

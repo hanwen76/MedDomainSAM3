@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
+
+from prompt_system import PromptSystem
 
 
 def parse_args():
@@ -38,203 +39,27 @@ def parse_args():
     return parser.parse_args()
 
 
-def norm_text(s: str):
-    s = s.strip().lower()
-    s = re.sub(r"[\s_\-]+", " ", s)
-    return s
-
-
-def load_json(path: Path):
-    return json.loads(path.read_text())
-
-
-def build_lookup(attributes: dict, aliases: dict | None):
-    canonical_norm_to_canonical = {norm_text(k): k for k in attributes.keys()}
-    alias_norm_to_canonical = {}
-    if aliases:
-        for alias, canonical in aliases.items():
-            alias_norm_to_canonical[norm_text(str(alias))] = str(canonical)
-    return canonical_norm_to_canonical, alias_norm_to_canonical
-
-
-def resolve_canonical(raw_prompt, canonical_norm_to_canonical, alias_norm_to_canonical):
-    key = norm_text(raw_prompt)
-    if key in alias_norm_to_canonical:
-        return alias_norm_to_canonical[key]
-    if key in canonical_norm_to_canonical:
-        return canonical_norm_to_canonical[key]
-    return None
-
-
-def compose_prompt(canonical: str, attrs: list[str], fmt: str, sep: str):
-    attrs = [a.strip() for a in attrs if str(a).strip()]
-    if len(attrs) == 0:
-        return canonical
-    if fmt == "class_then_attrs":
-        return sep.join([canonical] + attrs)
-    return sep.join(attrs + [canonical])
-
-
-def expand_one_prompt(
-    raw_prompt: str,
-    attributes: dict,
-    canonical_norm_to_canonical: dict,
-    alias_norm_to_canonical: dict,
-    topk_attrs: int,
-    unknown_policy: str,
-    fmt: str,
-    sep: str,
-):
-    canonical = resolve_canonical(raw_prompt, canonical_norm_to_canonical, alias_norm_to_canonical)
-    if canonical is None:
-        if unknown_policy == "error":
-            raise KeyError(f"Unknown prompt: {raw_prompt!r}")
-        if unknown_policy == "canonical_only":
-            return raw_prompt, raw_prompt, [], False
-        return raw_prompt, raw_prompt, [], False
-
-    attrs = attributes.get(canonical, [])
-    if topk_attrs > 0:
-        attrs = attrs[:topk_attrs]
-    expanded = compose_prompt(canonical, attrs, fmt, sep)
-    return raw_prompt, expanded, attrs, True
-
-
-def expand_mapping_payload(
-    payload: dict,
-    attributes: dict,
-    canonical_norm_to_canonical: dict,
-    alias_norm_to_canonical: dict,
-    topk_attrs: int,
-    unknown_policy: str,
-    fmt: str,
-    sep: str,
-):
-    output = {}
-    details = {}
-    known = 0
-    unknown = 0
-    for key, raw_prompt in payload.items():
-        if raw_prompt is None:
-            output[key] = None
-            details[key] = {"raw_prompt": None, "expanded_prompt": None, "matched": False}
-            unknown += 1
-            continue
-        raw_prompt = str(raw_prompt)
-        raw, expanded, attrs, matched = expand_one_prompt(
-            raw_prompt=raw_prompt,
-            attributes=attributes,
-            canonical_norm_to_canonical=canonical_norm_to_canonical,
-            alias_norm_to_canonical=alias_norm_to_canonical,
-            topk_attrs=topk_attrs,
-            unknown_policy=unknown_policy,
-            fmt=fmt,
-            sep=sep,
-        )
-        output[key] = expanded
-        details[key] = {
-            "raw_prompt": raw,
-            "expanded_prompt": expanded,
-            "attrs_used": attrs,
-            "matched": matched,
-        }
-        if matched:
-            known += 1
-        else:
-            unknown += 1
-    return output, details, known, unknown
-
-
-def expand_dataset_list_payload(
-    payload: list,
-    attributes: dict,
-    canonical_norm_to_canonical: dict,
-    alias_norm_to_canonical: dict,
-    topk_attrs: int,
-    unknown_policy: str,
-    fmt: str,
-    sep: str,
-):
-    output = []
-    details = []
-    known = 0
-    unknown = 0
-    for idx, item in enumerate(payload):
-        if not isinstance(item, dict):
-            raise ValueError(f"datasets-json[{idx}] must be an object")
-        if "prompt" not in item:
-            raise ValueError(f"datasets-json[{idx}] missing prompt field")
-        raw_prompt = str(item["prompt"])
-        raw, expanded, attrs, matched = expand_one_prompt(
-            raw_prompt=raw_prompt,
-            attributes=attributes,
-            canonical_norm_to_canonical=canonical_norm_to_canonical,
-            alias_norm_to_canonical=alias_norm_to_canonical,
-            topk_attrs=topk_attrs,
-            unknown_policy=unknown_policy,
-            fmt=fmt,
-            sep=sep,
-        )
-        new_item = dict(item)
-        new_item["prompt_raw"] = raw
-        new_item["prompt"] = expanded
-        output.append(new_item)
-        details.append(
-            {
-                "index": idx,
-                "raw_prompt": raw,
-                "expanded_prompt": expanded,
-                "attrs_used": attrs,
-                "matched": matched,
-            }
-        )
-        if matched:
-            known += 1
-        else:
-            unknown += 1
-    return output, details, known, unknown
-
-
 def main():
     args = parse_args()
-    payload = load_json(args.input_json)
-    attributes = load_json(args.attributes_json)
-    aliases = load_json(args.aliases_json) if args.aliases_json is not None else {}
+    payload_obj = json.loads(args.input_json.read_text())
+    prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
+    if not prompt_system.is_enabled():
+        raise ValueError("attributes-json/aliases-json produced an empty prompt system")
 
-    if not isinstance(attributes, dict) or len(attributes) == 0:
-        raise ValueError("attributes-json must be a non-empty object: canonical_prompt -> [attrs]")
-    for key, value in attributes.items():
-        if not isinstance(value, list):
-            raise ValueError(f"attributes-json[{key!r}] must be a list of attributes")
-
-    canonical_norm_to_canonical, alias_norm_to_canonical = build_lookup(attributes, aliases)
-
-    if isinstance(payload, dict):
-        output, details, known, unknown = expand_mapping_payload(
-            payload=payload,
-            attributes=attributes,
-            canonical_norm_to_canonical=canonical_norm_to_canonical,
-            alias_norm_to_canonical=alias_norm_to_canonical,
-            topk_attrs=args.topk_attrs,
-            unknown_policy=args.unknown_policy,
-            fmt=args.format,
-            sep=args.separator,
-        )
+    output, details, known, unknown = prompt_system.expand_json_payload(
+        payload_obj,
+        topk_attrs=args.topk_attrs,
+        unknown_policy=args.unknown_policy,
+        fmt=args.format,
+        separator=args.separator,
+    )
+    if isinstance(payload_obj, dict):
         input_type = "mapping"
-    elif isinstance(payload, list):
-        output, details, known, unknown = expand_dataset_list_payload(
-            payload=payload,
-            attributes=attributes,
-            canonical_norm_to_canonical=canonical_norm_to_canonical,
-            alias_norm_to_canonical=alias_norm_to_canonical,
-            topk_attrs=args.topk_attrs,
-            unknown_policy=args.unknown_policy,
-            fmt=args.format,
-            sep=args.separator,
-        )
-        input_type = "list"
     else:
-        raise ValueError("input-json must be either a JSON object or a JSON list")
+        input_type = "list"
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(output, indent=2))
@@ -249,6 +74,7 @@ def main():
         "topk_attrs": args.topk_attrs,
         "format": args.format,
         "unknown_policy": args.unknown_policy,
+        "prompt_system": prompt_system.manifest(),
         "details": details,
     }
     if args.save_report is not None:
