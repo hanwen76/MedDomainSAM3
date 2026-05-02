@@ -74,12 +74,30 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--image-stem-prefix",
+        type=str,
+        default="",
+        help=(
+            "Optional prefix stripped from image filenames before pairing, "
+            "e.g. 'image_' maps image_case001.npy to case001."
+        ),
+    )
+    parser.add_argument(
         "--mask-stem-suffix",
         type=str,
         default="",
         help=(
             "Optional suffix stripped from mask filenames before pairing, "
             "e.g. '_mask' maps case001_mask.npy to case001."
+        ),
+    )
+    parser.add_argument(
+        "--mask-stem-prefix",
+        type=str,
+        default="",
+        help=(
+            "Optional prefix stripped from mask filenames before pairing, "
+            "e.g. 'mask_' maps mask_case001.npy to case001."
         ),
     )
     parser.add_argument(
@@ -108,9 +126,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def normalize_stem(stem: str, suffix_to_strip: str):
+def normalize_stem(stem: str, prefix_to_strip: str = "", suffix_to_strip: str = ""):
+    if prefix_to_strip and stem.startswith(prefix_to_strip):
+        stem = stem[len(prefix_to_strip) :]
     if suffix_to_strip and stem.endswith(suffix_to_strip):
-        return stem[: -len(suffix_to_strip)]
+        stem = stem[: -len(suffix_to_strip)]
     return stem
 
 
@@ -118,29 +138,31 @@ def collect_pairs(
     image_dir: Path,
     mask_dir: Path,
     extensions,
+    image_stem_prefix: str = "",
     image_stem_suffix: str = "",
+    mask_stem_prefix: str = "",
     mask_stem_suffix: str = "",
 ):
     ext_set = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
     image_paths = {}
     for path in image_dir.rglob("*"):
         if path.is_file() and path.suffix.lower() in ext_set:
-            key = normalize_stem(path.stem, image_stem_suffix)
+            key = normalize_stem(path.stem, image_stem_prefix, image_stem_suffix)
             if key in image_paths:
                 raise ValueError(
                     f"Duplicate image key {key!r}: {image_paths[key]} and {path}. "
-                    "Adjust --image-stem-suffix or rename files."
+                    "Adjust --image-stem-prefix/--image-stem-suffix or rename files."
                 )
             image_paths[key] = path
 
     mask_paths = {}
     for path in mask_dir.rglob("*"):
         if path.is_file() and path.suffix.lower() in ext_set:
-            key = normalize_stem(path.stem, mask_stem_suffix)
+            key = normalize_stem(path.stem, mask_stem_prefix, mask_stem_suffix)
             if key in mask_paths:
                 raise ValueError(
                     f"Duplicate mask key {key!r}: {mask_paths[key]} and {path}. "
-                    "Adjust --mask-stem-suffix or rename files."
+                    "Adjust --mask-stem-prefix/--mask-stem-suffix or rename files."
                 )
             mask_paths[key] = path
 
@@ -490,7 +512,9 @@ def main():
         args.image_dir,
         args.mask_dir,
         args.extensions,
+        image_stem_prefix=args.image_stem_prefix,
         image_stem_suffix=args.image_stem_suffix,
+        mask_stem_prefix=args.mask_stem_prefix,
         mask_stem_suffix=args.mask_stem_suffix,
     )
     metadata_map = load_metadata(args.metadata_json)
