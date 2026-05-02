@@ -34,9 +34,9 @@
       "breast abnormality"
     ],
     "descriptions": [
-      "abnormal dark area in the breast ultrasound image",
-      "hypoechoic mass in the breast ultrasound image",
-      "suspicious dark lesion in the breast ultrasound image"
+      "abnormal dark area",
+      "hypoechoic mass",
+      "suspicious dark lesion"
     ],
     "preferred_mode": "expanded"
   },
