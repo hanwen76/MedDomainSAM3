@@ -35,8 +35,35 @@
     ],
     "descriptions": [
       "abnormal dark area",
+      "dark irregular mass",
       "hypoechoic mass",
+      "hypoechoic dark area",
       "suspicious dark lesion"
+      ,
+      "irregular dark lesion",
+      "focal dark mass",
+      "low echo mass",
+      "suspicious hypoechoic area",
+      "dark lesion"
+    ],
+    "preferred_mode": "expanded"
+  },
+  "cervical lesion": {
+    "aliases": [
+      "cervical tumor",
+      "cervical mass",
+      "cervix lesion",
+      "cervical abnormality"
+    ],
+    "descriptions": [
+      "abnormal cervical lesion",
+      "focal cervical lesion",
+      "irregular cervical lesion",
+      "suspicious cervical lesion",
+      "abnormal cervical region",
+      "cervical tumor",
+      "cervical mass",
+      "cervical lesion"
     ],
     "preferred_mode": "expanded"
   },
@@ -49,6 +76,82 @@
       "abnormal region in the image",
       "focal abnormal region",
       "suspicious visible region in the image"
+    ],
+    "preferred_mode": "expanded"
+  },
+  "retinal vessel": {
+    "aliases": [
+      "blood vessel",
+      "retinal blood vessel",
+      "vessel",
+      "vascular structure"
+    ],
+    "descriptions": [
+      "retinal blood vessel",
+      "thin retinal vessel",
+      "vessel in the retinal image",
+      "branching retinal vessel",
+      "retinal vascular structure",
+      "small blood vessel in the retina",
+      "retinal vessel network",
+      "retinal vessel"
+    ],
+    "preferred_mode": "canonical"
+  },
+  "optic cup": {
+    "aliases": [
+      "cup",
+      "disc cup",
+      "optic cup region",
+      "cup region"
+    ],
+    "descriptions": [
+      "optic cup region",
+      "cup-shaped region in the optic disc",
+      "central cup region",
+      "cupped region",
+      "bright central cup region",
+      "optic cup boundary",
+      "central cup",
+      "optic cup"
+    ],
+    "preferred_mode": "expanded"
+  },
+  "optic disc": {
+    "aliases": [
+      "disc",
+      "optic nerve head",
+      "retinal disc",
+      "optic disc region"
+    ],
+    "descriptions": [
+      "optic disc region",
+      "round optic disc",
+      "bright circular disc",
+      "optic nerve head",
+      "disc boundary",
+      "round retinal disc",
+      "retinal optic disc",
+      "optic disc"
+    ],
+    "preferred_mode": "expanded"
+  },
+  "nucleus": {
+    "aliases": [
+      "cell nucleus",
+      "nuclei",
+      "nuclear region",
+      "cell nuclei"
+    ],
+    "descriptions": [
+      "cell nucleus",
+      "dark round nucleus",
+      "small round nucleus",
+      "nuclear region",
+      "hematoxylin-stained nucleus",
+      "individual cell nucleus",
+      "round cell nucleus",
+      "nucleus"
     ],
     "preferred_mode": "expanded"
   },

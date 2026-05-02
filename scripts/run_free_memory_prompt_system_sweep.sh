@@ -12,6 +12,8 @@ set -euo pipefail
 # - Prostate runs raw/canonical/expanded by default because that is the best
 #   place to validate the prompt-system change.
 # - Other datasets run raw only unless PROMPT_MODES is set explicitly.
+# - Set PROMPT_CANDIDATE_SWEEP=1 to run the full candidate list for each dataset
+#   prompt instead of the normal raw/canonical/expanded modes.
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -37,6 +39,12 @@ IMAGE_STEM_PREFIX="${IMAGE_STEM_PREFIX:-}"
 IMAGE_STEM_SUFFIX="${IMAGE_STEM_SUFFIX:-}"
 MASK_STEM_PREFIX="${MASK_STEM_PREFIX:-}"
 MASK_STEM_SUFFIX="${MASK_STEM_SUFFIX:-}"
+PROMPT_CANDIDATE_SWEEP="${PROMPT_CANDIDATE_SWEEP:-0}"
+PROMPT_CANDIDATE_INCLUDE_RAW="${PROMPT_CANDIDATE_INCLUDE_RAW:-1}"
+PROMPT_CANDIDATE_INCLUDE_CANONICAL="${PROMPT_CANDIDATE_INCLUDE_CANONICAL:-1}"
+PROMPT_CANDIDATE_INCLUDE_EXPANDED="${PROMPT_CANDIDATE_INCLUDE_EXPANDED:-1}"
+PROMPT_CANDIDATE_INCLUDE_DESCRIPTIONS="${PROMPT_CANDIDATE_INCLUDE_DESCRIPTIONS:-1}"
+PROMPT_CANDIDATE_LIMIT="${PROMPT_CANDIDATE_LIMIT:-}"
 ATTR_JSON="${ATTR_JSON:-$PROJECT_ROOT/scripts/prompt_templates/attributes_template.json}"
 ALIAS_JSON="${ALIAS_JSON:-$PROJECT_ROOT/scripts/prompt_templates/aliases_template.json}"
 STAGES="${STAGES:-train,eval}"
@@ -115,24 +123,92 @@ dataset_prompt() {
   esac
 }
 
+candidate_sweep_enabled() {
+  [[ "$PROMPT_CANDIDATE_SWEEP" != "0" ]]
+}
+
+candidate_specs_for_dataset() {
+  local dataset="$1"
+  local prompt
+  prompt="$(dataset_prompt "$dataset")"
+
+  "$PYTHON_BIN" - "$PROJECT_ROOT/scripts" "$prompt" "$ATTR_JSON" "$ALIAS_JSON" \
+    "$PROMPT_CANDIDATE_INCLUDE_RAW" \
+    "$PROMPT_CANDIDATE_INCLUDE_CANONICAL" \
+    "$PROMPT_CANDIDATE_INCLUDE_EXPANDED" \
+    "$PROMPT_CANDIDATE_INCLUDE_DESCRIPTIONS" \
+    "$PROMPT_CANDIDATE_LIMIT" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+scripts_dir = Path(sys.argv[1])
+raw_prompt = sys.argv[2]
+attributes_json = Path(sys.argv[3])
+aliases_json = Path(sys.argv[4])
+include_raw = sys.argv[5] != "0"
+include_canonical = sys.argv[6] != "0"
+include_expanded = sys.argv[7] != "0"
+include_descriptions = sys.argv[8] != "0"
+limit = int(sys.argv[9]) if sys.argv[9] else None
+
+sys.path.insert(0, str(scripts_dir))
+from prompt_system import PromptSystem, norm_text
+
+def slugify(text: str) -> str:
+    text = norm_text(text)
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    text = text.strip("_")
+    return text[:64] or "prompt"
+
+ps = PromptSystem.from_paths(attributes_json=attributes_json, aliases_json=aliases_json)
+candidates = ps.medical_prompt_candidates(
+    raw_prompt,
+    include_raw=include_raw,
+    include_canonical=include_canonical,
+    include_expanded=include_expanded,
+    include_descriptions=include_descriptions,
+)
+
+if limit is not None:
+    candidates = candidates[:limit]
+
+for idx, candidate in enumerate(candidates, start=1):
+    label = f"{idx:02d}_{candidate.source}_{slugify(candidate.expanded_prompt)}"
+    print(f"{label}\t{candidate.expanded_prompt}")
+PY
+}
+
 train_one() {
   local dataset="$1"
   local site="$2"
-  local mode="$3"
+  local output_group="$3"
+  local prompt_mode="${4:-$3}"
+  local variant_label="${5:-}"
+  local prompt_override="${6:-}"
 
   local base_dir
   base_dir="$(dataset_base_dir "$dataset")"
   local prompt
-  prompt="$(dataset_prompt "$dataset")"
-  if [[ "$dataset" == "prostate" && "$mode" != "raw" ]]; then
+  if [[ -n "$prompt_override" ]]; then
+    prompt="$prompt_override"
+  else
+    prompt="$(dataset_prompt "$dataset")"
+  fi
+  if [[ -z "$prompt_override" && "$dataset" == "prostate" && "$prompt_mode" != "raw" ]]; then
     prompt="$PROMPT_SYS_TEST_PROMPT"
   fi
 
   local image_dir="$base_dir/$site/data_npy"
   local mask_dir="$base_dir/$site/label_npy"
-  local output_path="$OUT_ROOT/$dataset/$mode/$site/free_memory_tokens.pt"
+  local output_dir="$OUT_ROOT/$dataset/$output_group/$site"
+  if [[ -n "$variant_label" ]]; then
+    output_dir="$output_dir/$variant_label"
+  fi
+  local output_path="$output_dir/free_memory_tokens.pt"
 
-  mkdir -p "$(dirname "$output_path")"
+  mkdir -p "$output_dir"
+  printf '%s\n' "$prompt" > "$output_dir/prompt.txt"
 
   local cmd=(
     "$PYTHON_BIN" "$PROJECT_ROOT/scripts/train_free_memory_tokens.py"
@@ -150,7 +226,7 @@ train_one() {
     --image-stem-suffix "$IMAGE_STEM_SUFFIX"
     --mask-stem-prefix "$MASK_STEM_PREFIX"
     --mask-stem-suffix "$MASK_STEM_SUFFIX"
-    --prompt-system-mode "$mode"
+    --prompt-system-mode "$prompt_mode"
     --attributes-json "$ATTR_JSON"
     --aliases-json "$ALIAS_JSON"
   )
@@ -159,27 +235,38 @@ train_one() {
     cmd+=(--limit "$TRAIN_LIMIT")
   fi
 
-  echo "[TRAIN][$dataset][$site][$mode] ${cmd[*]}"
+  echo "[TRAIN][$dataset][$site][$output_group/$prompt_mode] ${cmd[*]}"
   "${cmd[@]}"
 }
 
 eval_one() {
   local dataset="$1"
   local site="$2"
-  local mode="$3"
+  local output_group="$3"
+  local prompt_mode="${4:-$3}"
+  local variant_label="${5:-}"
+  local prompt_override="${6:-}"
 
   local base_dir
   base_dir="$(dataset_base_dir "$dataset")"
   local prompt
-  prompt="$(dataset_prompt "$dataset")"
-  if [[ "$dataset" == "prostate" && "$mode" != "raw" ]]; then
+  if [[ -n "$prompt_override" ]]; then
+    prompt="$prompt_override"
+  else
+    prompt="$(dataset_prompt "$dataset")"
+  fi
+  if [[ -z "$prompt_override" && "$dataset" == "prostate" && "$prompt_mode" != "raw" ]]; then
     prompt="$PROMPT_SYS_TEST_PROMPT"
   fi
 
   local image_dir="$base_dir/$site/val_data_npy"
   local mask_dir="$base_dir/$site/val_label_npy"
-  local free_ckpt="$OUT_ROOT/$dataset/$mode/$site/free_memory_tokens.pt"
-  local eval_dir="$OUT_ROOT/$dataset/$mode/$site/eval"
+  local output_dir="$OUT_ROOT/$dataset/$output_group/$site"
+  if [[ -n "$variant_label" ]]; then
+    output_dir="$output_dir/$variant_label"
+  fi
+  local free_ckpt="$output_dir/free_memory_tokens.pt"
+  local eval_dir="$output_dir/eval"
 
   mkdir -p "$eval_dir"
 
@@ -201,19 +288,43 @@ eval_one() {
     --image-stem-suffix "$IMAGE_STEM_SUFFIX"
     --mask-stem-prefix "$MASK_STEM_PREFIX"
     --mask-stem-suffix "$MASK_STEM_SUFFIX"
-    --prompt-system-mode "$mode"
+    --prompt-system-mode "$prompt_mode"
     --attributes-json "$ATTR_JSON"
     --aliases-json "$ALIAS_JSON"
   )
 
-  echo "[EVAL][$dataset][$site][$mode] ${cmd[*]}"
+  echo "[EVAL][$dataset][$site][$output_group/$prompt_mode] ${cmd[*]}"
   "${cmd[@]}"
+}
+
+run_candidate_dataset() {
+  local dataset="$1"
+  local sites
+  sites="$(dataset_sites "$dataset")"
+  local specs
+  specs="$(candidate_specs_for_dataset "$dataset")"
+
+  local spec
+  while IFS=$'\t' read -r label prompt; do
+    [[ -z "$label" ]] && continue
+    for site in $sites; do
+      if has_stage train; then
+        train_one "$dataset" "$site" "candidates" "raw" "$label" "$prompt"
+      fi
+      if has_stage eval; then
+        eval_one "$dataset" "$site" "candidates" "raw" "$label" "$prompt"
+      fi
+    done
+  done <<< "$specs"
 }
 
 run_dataset() {
   local dataset="$1"
-  local base_dir
-  base_dir="$(dataset_base_dir "$dataset")"
+  if candidate_sweep_enabled; then
+    run_candidate_dataset "$dataset"
+    return
+  fi
+
   local sites
   sites="$(dataset_sites "$dataset")"
   local prompt_modes

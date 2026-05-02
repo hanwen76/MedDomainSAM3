@@ -183,6 +183,35 @@ class PromptSystem:
             return separator.join([canonical] + attrs)
         return separator.join(attrs + [canonical])
 
+    def _score_medical_description(self, description: str) -> tuple[int, int, str]:
+        tokens = [tok for tok in norm_text(description).split(" ") if tok]
+        keywords = {
+            "abnormal",
+            "dark",
+            "hypoechoic",
+            "hypodense",
+            "lesion",
+            "mass",
+            "nodule",
+            "irregular",
+            "focal",
+            "small",
+            "suspicious",
+            "protruding",
+            "round",
+            "rounded",
+            "visible",
+            "region",
+        }
+        keyword_hits = sum(1 for tok in tokens if tok in keywords)
+        # Prefer short, visual, medically specific phrases.
+        return (keyword_hits, -len(tokens), description)
+
+    def select_medical_description(self, rule: MedicalPromptRule) -> str | None:
+        if not rule.descriptions:
+            return None
+        return max(rule.descriptions, key=self._score_medical_description)
+
     def expand_prompt(
         self,
         raw_prompt: str,
@@ -242,6 +271,21 @@ class PromptSystem:
             return candidates
 
         seen = {norm_text(item.expanded_prompt) for item in candidates}
+        for alias in rule.aliases:
+            candidate = PromptExpansion(
+                raw_prompt=raw_prompt,
+                canonical_prompt=rule.canonical,
+                expanded_prompt=alias,
+                attrs_used=[],
+                matched=True,
+                source="alias",
+            )
+            key = norm_text(candidate.expanded_prompt)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(candidate)
+
         for desc in rule.descriptions:
             candidate = PromptExpansion(
                 raw_prompt=raw_prompt,
