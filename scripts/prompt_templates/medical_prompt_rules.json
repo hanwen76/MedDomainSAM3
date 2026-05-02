@@ -1,0 +1,65 @@
+{
+  "prostate": {
+    "aliases": [
+      "prostate gland",
+      "prostate region",
+      "prostate area",
+      "prostate tissue"
+    ],
+    "descriptions": [
+      "prostate gland",
+      "prostate gland region",
+      "prostate gland tissue"
+    ],
+    "preferred_mode": "canonical"
+  },
+  "polyp": {
+    "aliases": [
+      "colon polyp",
+      "colonic polyp",
+      "intestinal polyp"
+    ],
+    "descriptions": [
+      "abnormal protruding region in the colonoscopy image",
+      "abnormal protruding mucosal region in the colonoscopy image",
+      "abnormal protruding lesion in the colonoscopy image"
+    ],
+    "preferred_mode": "expanded"
+  },
+  "lesion": {
+    "aliases": [
+      "abnormal lesion",
+      "focal lesion"
+    ],
+    "descriptions": [
+      "abnormal region in the image",
+      "focal abnormal region",
+      "suspicious visible region in the image"
+    ],
+    "preferred_mode": "expanded"
+  },
+  "lung nodule": {
+    "aliases": [
+      "pulmonary nodule",
+      "lung lesion"
+    ],
+    "descriptions": [
+      "small round nodule in the lung image",
+      "small rounded lesion in the lung image",
+      "small pulmonary nodule"
+    ],
+    "preferred_mode": "canonical"
+  },
+  "brain tumor": {
+    "aliases": [
+      "brain mass",
+      "intracranial tumor"
+    ],
+    "descriptions": [
+      "abnormal mass in the brain image",
+      "heterogeneous abnormal mass in the brain image",
+      "brain lesion with irregular boundary"
+    ],
+    "preferred_mode": "expanded"
+  }
+}

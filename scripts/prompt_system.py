@@ -17,6 +17,7 @@ from typing import Iterable
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ATTRIBUTES_JSON = SCRIPT_DIR / "prompt_templates" / "attributes_template.json"
 DEFAULT_ALIASES_JSON = SCRIPT_DIR / "prompt_templates" / "aliases_template.json"
+DEFAULT_MEDICAL_RULES_JSON = SCRIPT_DIR / "prompt_templates" / "medical_prompt_rules.json"
 
 
 def norm_text(s: str) -> str:
@@ -41,6 +42,26 @@ class PromptExpansion:
     source: str
 
 
+@dataclass(frozen=True)
+class MedicalPromptRule:
+    canonical: str
+    aliases: list[str]
+    descriptions: list[str]
+    preferred_mode: str = "canonical"
+
+    def all_variants(self) -> list[str]:
+        variants = [self.canonical, *self.aliases, *self.descriptions]
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for item in variants:
+            key = norm_text(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(item)
+        return ordered
+
+
 class PromptSystem:
     """Central prompt registry for aliasing, canonicalization, and expansion."""
 
@@ -48,13 +69,17 @@ class PromptSystem:
         self,
         attributes: dict[str, list[str]] | None = None,
         aliases: dict[str, str] | None = None,
+        medical_rules: dict[str, dict] | None = None,
         attributes_json_path: Path | None = None,
         aliases_json_path: Path | None = None,
+        medical_rules_json_path: Path | None = None,
     ):
         self.attributes = attributes or {}
         self.aliases = aliases or {}
+        self.medical_rules = medical_rules or {}
         self.attributes_json_path = attributes_json_path
         self.aliases_json_path = aliases_json_path
+        self.medical_rules_json_path = medical_rules_json_path
         self._canonical_norm_to_canonical = {
             norm_text(name): name for name in self.attributes.keys()
         }
@@ -62,18 +87,22 @@ class PromptSystem:
             norm_text(str(alias)): str(canonical)
             for alias, canonical in self.aliases.items()
         }
+        self._medical_rules_by_canonical = self._build_medical_rules_index()
 
     @classmethod
     def from_paths(
         cls,
         attributes_json: Path | None = None,
         aliases_json: Path | None = None,
+        medical_rules_json: Path | None = None,
     ) -> "PromptSystem":
         attributes_path = attributes_json or DEFAULT_ATTRIBUTES_JSON
         aliases_path = aliases_json or DEFAULT_ALIASES_JSON
+        medical_rules_path = medical_rules_json or DEFAULT_MEDICAL_RULES_JSON
 
         attributes: dict[str, list[str]] = {}
         aliases: dict[str, str] = {}
+        medical_rules: dict[str, dict] = {}
 
         if attributes_path is not None and attributes_path.exists():
             payload = load_json(attributes_path)
@@ -90,15 +119,44 @@ class PromptSystem:
                 raise ValueError("aliases-json must be a JSON object")
             aliases = {str(key): str(value) for key, value in payload.items()}
 
+        if medical_rules_path is not None and medical_rules_path.exists():
+            payload = load_json(medical_rules_path)
+            if not isinstance(payload, dict):
+                raise ValueError("medical-rules-json must be a JSON object")
+            medical_rules = {str(key): dict(value) for key, value in payload.items()}
+
         return cls(
             attributes=attributes,
             aliases=aliases,
+            medical_rules=medical_rules,
             attributes_json_path=attributes_path,
             aliases_json_path=aliases_path,
+            medical_rules_json_path=medical_rules_path,
         )
 
     def is_enabled(self) -> bool:
-        return len(self.attributes) > 0 or len(self.aliases) > 0
+        return len(self.attributes) > 0 or len(self.aliases) > 0 or len(self.medical_rules) > 0
+
+    def _build_medical_rules_index(self) -> dict[str, MedicalPromptRule]:
+        indexed: dict[str, MedicalPromptRule] = {}
+        for canonical, payload in self.medical_rules.items():
+            aliases = [str(x) for x in payload.get("aliases", [])]
+            descriptions = [str(x) for x in payload.get("descriptions", [])]
+            preferred_mode = str(payload.get("preferred_mode", "canonical"))
+            rule = MedicalPromptRule(
+                canonical=canonical,
+                aliases=aliases,
+                descriptions=descriptions,
+                preferred_mode=preferred_mode,
+            )
+            indexed[norm_text(canonical)] = rule
+            for alias in aliases:
+                indexed[norm_text(alias)] = rule
+        return indexed
+
+    def medical_rule_for(self, raw_prompt: str) -> MedicalPromptRule | None:
+        key = norm_text(raw_prompt)
+        return self._medical_rules_by_canonical.get(key)
 
     def resolve_canonical(self, raw_prompt: str) -> str | None:
         key = norm_text(raw_prompt)
@@ -155,6 +213,47 @@ class PromptSystem:
             matched=True,
             source="expanded" if expanded != canonical else "canonical",
         )
+
+    def medical_prompt_candidates(
+        self,
+        raw_prompt: str,
+        topk_attrs: int = 3,
+        fmt: str = "attrs_then_class",
+        separator: str = ", ",
+        include_raw: bool = True,
+        include_canonical: bool = True,
+        include_expanded: bool = True,
+        include_descriptions: bool = True,
+    ) -> list[PromptExpansion]:
+        candidates = self.candidate_prompts(
+            raw_prompt=raw_prompt,
+            topk_attrs=topk_attrs,
+            fmt=fmt,
+            separator=separator,
+            include_raw=include_raw,
+            include_canonical=include_canonical,
+            include_expanded=include_expanded,
+        )
+        rule = self.medical_rule_for(raw_prompt)
+        if rule is None or not include_descriptions:
+            return candidates
+
+        seen = {norm_text(item.expanded_prompt) for item in candidates}
+        for desc in rule.descriptions:
+            candidate = PromptExpansion(
+                raw_prompt=raw_prompt,
+                canonical_prompt=rule.canonical,
+                expanded_prompt=desc,
+                attrs_used=[],
+                matched=True,
+                source="description",
+            )
+            key = norm_text(candidate.expanded_prompt)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(candidate)
+        return candidates
 
     def transform_prompt(
         self,
@@ -233,8 +332,10 @@ class PromptSystem:
             "enabled": self.is_enabled(),
             "num_attributes": len(self.attributes),
             "num_aliases": len(self.aliases),
+            "num_medical_rules": len(self.medical_rules),
             "attributes_json": None if self.attributes_json_path is None else str(self.attributes_json_path),
             "aliases_json": None if self.aliases_json_path is None else str(self.aliases_json_path),
+            "medical_rules_json": None if self.medical_rules_json_path is None else str(self.medical_rules_json_path),
         }
 
     def expand_json_payload(
