@@ -106,11 +106,11 @@
       "cup region"
     ],
     "descriptions": [
-      "optic cup region",
-      "cup-shaped region in the optic disc",
-      "central cup region",
-      "cupped region",
-      "bright central cup region",
+      "central pale cup inside the optic disc",
+      "cup-shaped central region inside the optic disc",
+      "pale central cup",
+      "central cupped region",
+      "cup-shaped optic cup",
       "optic cup boundary",
       "central cup",
       "optic cup"
@@ -125,9 +125,9 @@
       "optic disc region"
     ],
     "descriptions": [
+      "bright circular optic disc",
+      "round bright optic disc",
       "optic disc region",
-      "round optic disc",
-      "bright circular disc",
       "optic nerve head",
       "disc boundary",
       "round retinal disc",
