@@ -141,14 +141,16 @@
       "cell nucleus",
       "nuclei",
       "nuclear region",
-      "cell nuclei"
+      "cell nuclei",
+      "cellular nucleus"
     ],
     "descriptions": [
-      "cell nucleus",
-      "dark round nucleus",
-      "small round nucleus",
-      "nuclear region",
+      "small dark round nucleus",
+      "dark round cell nucleus",
       "hematoxylin-stained nucleus",
+      "small round nucleus",
+      "cell nucleus",
+      "nuclear region",
       "individual cell nucleus",
       "round cell nucleus",
       "nucleus"
