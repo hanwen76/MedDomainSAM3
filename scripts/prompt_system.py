@@ -164,6 +164,9 @@ class PromptSystem:
             return self._alias_norm_to_canonical[key]
         if key in self._canonical_norm_to_canonical:
             return self._canonical_norm_to_canonical[key]
+        rule = self.medical_rule_for(raw_prompt)
+        if rule is not None:
+            return rule.canonical
         return None
 
     def compose_prompt(
@@ -265,6 +268,7 @@ class PromptSystem:
     ) -> str:
         if mode == "raw":
             return raw_prompt
+        rule = self.medical_rule_for(raw_prompt)
         expansion = self.expand_prompt(
             raw_prompt=raw_prompt,
             topk_attrs=topk_attrs,
@@ -274,6 +278,8 @@ class PromptSystem:
         if mode == "canonical":
             return expansion.canonical_prompt or raw_prompt
         if mode == "expanded":
+            if rule is not None and rule.preferred_mode == "expanded" and rule.descriptions:
+                return rule.descriptions[0]
             return expansion.expanded_prompt
         raise ValueError(f"Unsupported prompt mode: {mode}")
 

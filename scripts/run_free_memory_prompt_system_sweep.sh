@@ -69,7 +69,7 @@ prompt_modes_for_dataset() {
     echo "$PROMPT_MODES"
     return 0
   fi
-  if [[ "$dataset" == "prostate" ]]; then
+  if [[ "$dataset" == "prostate" || "$dataset" == "breast_tumor" ]]; then
     echo "raw canonical expanded"
   else
     echo "raw"
