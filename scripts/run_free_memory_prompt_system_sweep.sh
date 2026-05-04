@@ -2,7 +2,10 @@
 set -euo pipefail
 
 # Train + eval sweep for free-memory tokens with optional prompt-system modes.
-#
+# EPOCHS=25 MASK_STEM_SUFFIX=_mask CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh breast_tumor
+# EPOCHS=25 MASK_STEM_SUFFIX=_label CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh cervical
+# EPOCHS=5 CUDA_VISIBLE_DEVICES=1 bash scripts/run_free_memory_prompt_system_sweep.sh fundus_cup
+# PROMPT_MODES="expanded" EPOCHS=5 CUDA_VISIBLE_DEVICES=2 bash scripts/run_free_memory_prompt_system_sweep.sh retinal_vessel nuclei
 # Usage examples:
 #   CKPT=/path/to/sam3.pt OUT_ROOT=/path/to/out bash scripts/run_free_memory_prompt_system_sweep.sh prostate
 #   CKPT=/path/to/sam3.pt OUT_ROOT=/path/to/out STAGES=train,eval bash scripts/run_free_memory_prompt_system_sweep.sh prostate breast_tumor
@@ -14,6 +17,9 @@ set -euo pipefail
 # - Other datasets run raw only unless PROMPT_MODES is set explicitly.
 # - Set PROMPT_CANDIDATE_SWEEP=1 to run the full candidate list for each dataset
 #   prompt instead of the normal raw/canonical/expanded modes.
+export CKPT=/home/zhanghanwen/checkpoints/sam3.pt
+export OUT_ROOT=/home/zhanghanwen/text-sam3
+export PROMPT_MODES="raw expanded"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
