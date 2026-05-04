@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Train + eval sweep for free-memory tokens with optional prompt-system modes.
-# EPOCHS=25 MASK_STEM_SUFFIX=_mask CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh breast_tumor
-# EPOCHS=25 MASK_STEM_SUFFIX=_label CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh cervical
-# EPOCHS=5 CUDA_VISIBLE_DEVICES=1 bash scripts/run_free_memory_prompt_system_sweep.sh fundus_cup
-# PROMPT_MODES="expanded" EPOCHS=5 CUDA_VISIBLE_DEVICES=2 bash scripts/run_free_memory_prompt_system_sweep.sh retinal_vessel nuclei
+# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=2 MASK_STEM_SUFFIX=_mask CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh breast_tumor
+# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 MASK_STEM_SUFFIX=_label CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh cervical
+# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 CUDA_VISIBLE_DEVICES=3 bash scripts/run_free_memory_prompt_system_sweep.sh fundus_cup
+# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 CUDA_VISIBLE_DEVICES=2 bash scripts/run_free_memory_prompt_system_sweep.sh nuclei
 # Usage examples:
 #   CKPT=/path/to/sam3.pt OUT_ROOT=/path/to/out bash scripts/run_free_memory_prompt_system_sweep.sh prostate
 #   CKPT=/path/to/sam3.pt OUT_ROOT=/path/to/out STAGES=train,eval bash scripts/run_free_memory_prompt_system_sweep.sh prostate breast_tumor
@@ -30,7 +30,6 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 DEVICE="${DEVICE:-cuda}"
 IMAGE_SIZE="${IMAGE_SIZE:-1008}"
 NUM_TOKENS="${NUM_TOKENS:-4}"
-BATCH_SIZE="${BATCH_SIZE:-4}"
 EPOCHS="${EPOCHS:-5}"
 LR="${LR:-1e-2}"
 TRAIN_LIMIT="${TRAIN_LIMIT:-100}"
@@ -245,7 +244,6 @@ train_one() {
     --device "$DEVICE"
     --image-size "$IMAGE_SIZE"
     --num-tokens "$NUM_TOKENS"
-    --batch-size "$BATCH_SIZE"
     --epochs "$EPOCHS"
     --lr "$LR"
     --image-stem-prefix "$IMAGE_STEM_PREFIX"
