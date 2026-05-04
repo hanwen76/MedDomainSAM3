@@ -39,6 +39,7 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--image-size", type=int, default=1008)
     parser.add_argument("--num-tokens", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--limit", type=int, default=None)
@@ -224,6 +225,10 @@ def load_image(path: Path, transform, device: str):
     return tensor
 
 
+def load_image_batch(paths, transform, device: str):
+    return torch.cat([load_image(path, transform, device) for path in paths], dim=0)
+
+
 def load_mask(path: Path, image_size: int, device: str):
     if path.suffix.lower() == ".npy":
         mask_np = np.load(path)
@@ -245,6 +250,10 @@ def load_mask(path: Path, image_size: int, device: str):
     mask = torch.from_numpy(mask_np).unsqueeze(0).unsqueeze(0)
     mask = F.interpolate(mask, size=(image_size, image_size), mode="nearest")
     return (mask > 0.5).float().to(device)
+
+
+def load_mask_batch(paths, image_size: int, device: str):
+    return torch.cat([load_mask(path, image_size, device) for path in paths], dim=0)
 
 
 def dice_loss_from_logits(logits: torch.Tensor, target: torch.Tensor):
@@ -275,6 +284,13 @@ def resolve_text(stem: str, metadata: dict, default_text: str | None):
     return text
 
 
+def batch_items(items, batch_size: int):
+    if batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
+    for start in range(0, len(items), batch_size):
+        yield items[start : start + batch_size]
+
+
 def main():
     args = parse_args()
     pairs = collect_pairs(
@@ -289,6 +305,8 @@ def main():
         pairs = pairs[: args.limit]
     if not pairs:
         raise RuntimeError("No image/mask pairs found.")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
 
     metadata = load_metadata(args.metadata_json)
     prompt_system = PromptSystem.from_paths(
@@ -316,37 +334,43 @@ def main():
     model.memory_prompt_builder.train()
 
     optimizer = torch.optim.AdamW(model.memory_prompt_builder.parameters(), lr=args.lr)
-    find_stage = FindStage(
-        img_ids=torch.tensor([0], device=args.device, dtype=torch.long),
-        text_ids=torch.tensor([0], device=args.device, dtype=torch.long),
-        input_boxes=None,
-        input_boxes_mask=None,
-        input_boxes_label=None,
-        input_points=None,
-        input_points_mask=None,
-    )
-    geometric_prompt = Prompt(
-        box_embeddings=torch.zeros(0, 1, 4, device=args.device),
-        box_mask=torch.zeros(1, 0, device=args.device, dtype=torch.bool),
-    )
 
     history = []
     for epoch in range(args.epochs):
         epoch_loss = 0.0
-        for image_path, mask_path in pairs:
-            image = load_image(image_path, transform, args.device)
-            target = load_mask(mask_path, args.image_size, args.device)
-            text_prompt = resolve_text(image_path.stem, metadata, args.text_prompt)
-            text_prompt = prompt_system.transform_prompt(
-                text_prompt,
-                mode=args.prompt_system_mode,
-                topk_attrs=args.prompt_topk_attrs,
-                fmt=args.prompt_format,
-                separator=args.prompt_separator,
-            )
+        for batch in batch_items(pairs, args.batch_size):
+            image_paths = [image_path for image_path, _ in batch]
+            mask_paths = [mask_path for _, mask_path in batch]
+            text_prompts = []
+            for image_path in image_paths:
+                text_prompt = resolve_text(image_path.stem, metadata, args.text_prompt)
+                text_prompt = prompt_system.transform_prompt(
+                    text_prompt,
+                    mode=args.prompt_system_mode,
+                    topk_attrs=args.prompt_topk_attrs,
+                    fmt=args.prompt_format,
+                    separator=args.prompt_separator,
+                )
+                text_prompts.append(text_prompt)
 
+            batch_size = len(batch)
+            image = load_image_batch(image_paths, transform, args.device)
+            target = load_mask_batch(mask_paths, args.image_size, args.device)
             backbone_out = model.backbone.forward_image(image)
-            backbone_out.update(model.backbone.forward_text([text_prompt], device=args.device))
+            backbone_out.update(model.backbone.forward_text(text_prompts, device=args.device))
+            find_stage = FindStage(
+                img_ids=torch.arange(batch_size, device=args.device, dtype=torch.long),
+                text_ids=torch.arange(batch_size, device=args.device, dtype=torch.long),
+                input_boxes=None,
+                input_boxes_mask=None,
+                input_boxes_label=None,
+                input_points=None,
+                input_points_mask=None,
+            )
+            geometric_prompt = Prompt(
+                box_embeddings=torch.zeros(0, batch_size, 4, device=args.device),
+                box_mask=torch.zeros(batch_size, 0, device=args.device, dtype=torch.bool),
+            )
             out = model.forward_grounding(
                 backbone_out=backbone_out,
                 find_input=find_stage,
@@ -390,6 +414,7 @@ def main():
         "memory_prompt_builder": model.memory_prompt_builder.state_dict(),
         "config": {
             "num_tokens": args.num_tokens,
+            "batch_size": args.batch_size,
             "epochs": args.epochs,
             "lr": args.lr,
             "image_size": args.image_size,
