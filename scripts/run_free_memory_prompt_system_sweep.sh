@@ -46,6 +46,7 @@ IMAGE_STEM_PREFIX="${IMAGE_STEM_PREFIX:-}"
 IMAGE_STEM_SUFFIX="${IMAGE_STEM_SUFFIX:-}"
 MASK_STEM_PREFIX="${MASK_STEM_PREFIX:-}"
 MASK_STEM_SUFFIX="${MASK_STEM_SUFFIX:-}"
+PAIRING_MODE="${PAIRING_MODE:-}"
 PROMPT_CANDIDATE_SWEEP="${PROMPT_CANDIDATE_SWEEP:-0}"
 PROMPT_CANDIDATE_INCLUDE_RAW="${PROMPT_CANDIDATE_INCLUDE_RAW:-1}"
 PROMPT_CANDIDATE_INCLUDE_CANONICAL="${PROMPT_CANDIDATE_INCLUDE_CANONICAL:-1}"
@@ -56,7 +57,7 @@ ATTR_JSON="${ATTR_JSON:-$PROJECT_ROOT/scripts/prompt_templates/attributes_templa
 ALIAS_JSON="${ALIAS_JSON:-$PROJECT_ROOT/scripts/prompt_templates/aliases_template.json}"
 STAGES="${STAGES:-train,eval}"
 
-SUPPORTED_DATASETS=(cervical breast_tumor prostate retinal_vessel fundus_cup fundus_disk nuclei)
+SUPPORTED_DATASETS=(cervical breast_tumor prostate retinal_vessel fundus_cup fundus_disk nuclei brain_tumor)
 
 has_stage() {
   local needle="$1"
@@ -84,7 +85,7 @@ prompt_modes_for_dataset() {
     echo "$PROMPT_MODES"
     return 0
   fi
-  if [[ "$dataset" == "prostate" || "$dataset" == "breast_tumor" ]]; then
+  if [[ "$dataset" == "prostate" || "$dataset" == "breast_tumor" || "$dataset" == "brain_tumor" ]]; then
     echo "raw canonical expanded"
   else
     echo "raw"
@@ -100,6 +101,7 @@ dataset_base_dir() {
     fundus_cup) echo "/home/zhanghanwen/fundus_1024_256_cup" ;;
     fundus_disk) echo "/home/zhanghanwen/fundus_1024_256_disk" ;;
     nuclei) echo "/mnt/diskB/zhw/Nuclei_82_1024_JPG" ;;
+    brain_tumor) echo "/mnt/diskB/zhw/FeTS2022_FedDG_82_240_2_JPG" ;;
     *) return 1 ;;
   esac
 }
@@ -113,6 +115,7 @@ dataset_sites() {
     fundus_cup) echo "fundus1 fundus2 fundus3 fundus4" ;;
     fundus_disk) echo "fundus1 fundus2 fundus3 fundus4" ;;
     nuclei) echo "MoNuSAC2018 MoNuSAC2020 PanNuke2Adrenal_gland PanNuke2Esophagus PanNuke3Bile-duct PanNuke3Uterus TNBC" ;;
+    brain_tumor) echo "1 6 18 21" ;;
     *) return 1 ;;
   esac
 }
@@ -126,7 +129,20 @@ dataset_prompt() {
     fundus_cup) echo "optic cup" ;;
     fundus_disk) echo "optic disc" ;;
     nuclei) echo "nucleus" ;;
+    brain_tumor) echo "brain tumor" ;;
     *) return 1 ;;
+  esac
+}
+
+pairing_mode_for_dataset() {
+  local dataset="$1"
+  if [[ -n "$PAIRING_MODE" ]]; then
+    echo "$PAIRING_MODE"
+    return 0
+  fi
+  case "$dataset" in
+    retinal_vessel) echo "sequential" ;;
+    *) echo "stem" ;;
   esac
 }
 
@@ -213,6 +229,8 @@ train_one() {
     output_dir="$output_dir/$variant_label"
   fi
   local output_path="$output_dir/free_memory_tokens.pt"
+  local pairing_mode
+  pairing_mode="$(pairing_mode_for_dataset "$dataset")"
 
   mkdir -p "$output_dir"
   printf '%s\n' "$prompt" > "$output_dir/prompt.txt"
@@ -234,6 +252,7 @@ train_one() {
     --image-stem-suffix "$IMAGE_STEM_SUFFIX"
     --mask-stem-prefix "$MASK_STEM_PREFIX"
     --mask-stem-suffix "$MASK_STEM_SUFFIX"
+    --pairing-mode "$pairing_mode"
     --prompt-system-mode "$prompt_mode"
     --attributes-json "$ATTR_JSON"
     --aliases-json "$ALIAS_JSON"
@@ -275,6 +294,8 @@ eval_one() {
   fi
   local free_ckpt="$output_dir/free_memory_tokens.pt"
   local eval_dir="$output_dir/eval"
+  local pairing_mode
+  pairing_mode="$(pairing_mode_for_dataset "$dataset")"
 
   mkdir -p "$eval_dir"
 
@@ -296,6 +317,7 @@ eval_one() {
     --image-stem-suffix "$IMAGE_STEM_SUFFIX"
     --mask-stem-prefix "$MASK_STEM_PREFIX"
     --mask-stem-suffix "$MASK_STEM_SUFFIX"
+    --pairing-mode "$pairing_mode"
     --prompt-system-mode "$prompt_mode"
     --attributes-json "$ATTR_JSON"
     --aliases-json "$ALIAS_JSON"

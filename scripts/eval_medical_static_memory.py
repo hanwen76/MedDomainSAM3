@@ -123,6 +123,13 @@ def parse_args():
         choices=["attrs_then_class", "class_then_attrs"],
     )
     parser.add_argument("--prompt-separator", type=str, default=", ")
+    parser.add_argument(
+        "--pairing-mode",
+        type=str,
+        default="stem",
+        choices=["stem", "sequential"],
+        help="How to pair images and masks. Sequential pairing matches sorted files by order.",
+    )
     return parser.parse_args()
 
 
@@ -134,6 +141,19 @@ def normalize_stem(stem: str, prefix_to_strip: str = "", suffix_to_strip: str = 
     return stem
 
 
+def natural_sort_key(path: Path):
+    import re
+
+    parts = re.split(r"(\d+)", str(path))
+    return [int(part) if part.isdigit() else part.lower() for part in parts]
+
+
+def collect_file_list(directory: Path, extensions):
+    ext_set = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
+    files = [path for path in directory.rglob("*") if path.is_file() and path.suffix.lower() in ext_set]
+    return sorted(files, key=natural_sort_key)
+
+
 def collect_pairs(
     image_dir: Path,
     mask_dir: Path,
@@ -142,7 +162,24 @@ def collect_pairs(
     image_stem_suffix: str = "",
     mask_stem_prefix: str = "",
     mask_stem_suffix: str = "",
+    pairing_mode: str = "stem",
 ):
+    if pairing_mode not in {"stem", "sequential"}:
+        raise ValueError("--pairing-mode must be one of: stem, sequential")
+
+    if pairing_mode == "sequential":
+        image_paths = collect_file_list(image_dir, extensions)
+        mask_paths = collect_file_list(mask_dir, extensions)
+        if not image_paths or not mask_paths:
+            return [], []
+        pair_count = min(len(image_paths), len(mask_paths))
+        if len(image_paths) != len(mask_paths):
+            print(
+                f"Warning: sequential pairing found {len(image_paths)} images and {len(mask_paths)} masks; "
+                f"using first {pair_count} pairs."
+            )
+        return list(zip(image_paths[:pair_count], mask_paths[:pair_count])), []
+
     ext_set = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
     image_paths = {}
     for path in image_dir.rglob("*"):
@@ -516,6 +553,7 @@ def main():
         image_stem_suffix=args.image_stem_suffix,
         mask_stem_prefix=args.mask_stem_prefix,
         mask_stem_suffix=args.mask_stem_suffix,
+        pairing_mode=args.pairing_mode,
     )
     metadata_map = load_metadata(args.metadata_json)
     if args.limit is not None:
