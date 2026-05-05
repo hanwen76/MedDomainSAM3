@@ -5,7 +5,8 @@ set -euo pipefail
 # PROMPT_CANDIDATE_SWEEP=1 EPOCHS=2 MASK_STEM_SUFFIX=_mask CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh breast_tumor
 # PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 MASK_STEM_SUFFIX=_label CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh cervical
 # PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 CUDA_VISIBLE_DEVICES=3 bash scripts/run_free_memory_prompt_system_sweep.sh fundus_cup
-# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 CUDA_VISIBLE_DEVICES=2 bash scripts/run_free_memory_prompt_system_sweep.sh nuclei
+# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=5 CUDA_VISIBLE_DEVICES=2 bash scripts/run_free_memory_prompt_system_sweep.sh brain_tumor
+# PROMPT_CANDIDATE_SWEEP=1 EPOCHS=25 CUDA_VISIBLE_DEVICES=0 bash scripts/run_free_memory_prompt_system_sweep.sh retinal_vessel
 # Usage examples:
 #   CKPT=/path/to/sam3.pt OUT_ROOT=/path/to/out bash scripts/run_free_memory_prompt_system_sweep.sh prostate
 #   CKPT=/path/to/sam3.pt OUT_ROOT=/path/to/out STAGES=train,eval bash scripts/run_free_memory_prompt_system_sweep.sh prostate breast_tumor
@@ -127,7 +128,7 @@ dataset_prompt() {
     retinal_vessel) echo "retinal vessel" ;;
     fundus_cup) echo "optic cup" ;;
     fundus_disk) echo "optic disc" ;;
-    nuclei) echo "nucleus" ;;
+    nuclei) echo "cell nuclei" ;;
     brain_tumor) echo "brain tumor" ;;
     *) return 1 ;;
   esac
