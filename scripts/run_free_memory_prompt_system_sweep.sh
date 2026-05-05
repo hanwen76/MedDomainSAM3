@@ -57,7 +57,7 @@ ATTR_JSON="${ATTR_JSON:-$PROJECT_ROOT/scripts/prompt_templates/attributes_templa
 ALIAS_JSON="${ALIAS_JSON:-$PROJECT_ROOT/scripts/prompt_templates/aliases_template.json}"
 STAGES="${STAGES:-train,eval}"
 
-SUPPORTED_DATASETS=(cervical breast_tumor prostate retinal_vessel fundus_cup fundus_disk nuclei brain_tumor)
+SUPPORTED_DATASETS=(cervical breast_tumor prostate retinal_vessel fundus_cup fundus_disk nuclei brain_tumor polyp)
 
 has_stage() {
   local needle="$1"
@@ -85,7 +85,7 @@ prompt_modes_for_dataset() {
     echo "$PROMPT_MODES"
     return 0
   fi
-  if [[ "$dataset" == "prostate" || "$dataset" == "breast_tumor" || "$dataset" == "brain_tumor" ]]; then
+  if [[ "$dataset" == "prostate" || "$dataset" == "breast_tumor" || "$dataset" == "brain_tumor" || "$dataset" == "polyp" ]]; then
     echo "raw canonical expanded"
   else
     echo "raw"
@@ -102,6 +102,7 @@ dataset_base_dir() {
     fundus_disk) echo "/home/zhanghanwen/fundus_1024_256_disk" ;;
     nuclei) echo "/mnt/diskB/zhw/Nuclei_82_1024_JPG" ;;
     brain_tumor) echo "/mnt/diskB/zhw/FeTS2022_FedDG_82_240_2_JPG" ;;
+    polyp) echo "/home/zhanghanwen/Polyp_1024_npy" ;;
     *) return 1 ;;
   esac
 }
@@ -116,6 +117,7 @@ dataset_sites() {
     fundus_disk) echo "fundus1 fundus2 fundus3 fundus4" ;;
     nuclei) echo "MoNuSAC2018 MoNuSAC2020 PanNuke2Adrenal_gland PanNuke2Esophagus PanNuke3Bile-duct PanNuke3Uterus TNBC" ;;
     brain_tumor) echo "1 6 18 21" ;;
+    polyp) echo "Clinic Etis Kvasir" ;;
     *) return 1 ;;
   esac
 }
@@ -130,6 +132,7 @@ dataset_prompt() {
     fundus_disk) echo "optic disc" ;;
     nuclei) echo "cell nuclei" ;;
     brain_tumor) echo "brain tumor" ;;
+    polyp) echo "polyp" ;;
     *) return 1 ;;
   esac
 }

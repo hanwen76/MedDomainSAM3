@@ -17,12 +17,21 @@
     "aliases": [
       "colon polyp",
       "colonic polyp",
-      "intestinal polyp"
+      "intestinal polyp",
+      "colorectal polyp",
+      "mucosal polyp",
+      "polypoid lesion",
+      "protruding polyp"
     ],
     "descriptions": [
       "abnormal protruding region in the colonoscopy image",
       "abnormal protruding mucosal region in the colonoscopy image",
-      "abnormal protruding lesion in the colonoscopy image"
+      "abnormal protruding lesion in the colonoscopy image",
+      "protruding mucosal lesion in the colonoscopy image",
+      "rounded protruding lesion in the colonoscopy image",
+      "small protruding lesion in the colonoscopy image",
+      "polypoid protruding lesion in the colonoscopy image",
+      "abnormal mucosal protrusion in the colonoscopy image"
     ],
     "preferred_mode": "expanded"
   },
