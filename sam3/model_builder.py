@@ -18,7 +18,10 @@ from sam3.model.decoder import (
 from sam3.model.free_memory_tokens import LearnableMemoryPrompt
 from sam3.model.encoder import TransformerEncoderFusion, TransformerEncoderLayer
 from sam3.model.geometry_encoders import SequenceGeometryEncoder
-from sam3.model.image_memory_prompt import ImageMemoryPromptBuilder
+from sam3.model.image_memory_prompt import (
+    CombinedMemoryPromptBuilder,
+    ImageMemoryPromptBuilder,
+)
 from sam3.model.maskformer_segmentation import PixelDecoder, UniversalSegmentationHead
 from sam3.model.memory import (
     CXBlock,
@@ -596,6 +599,9 @@ def build_sam3_image_model(
     static_memory_image_weight: float = 1.0,
     static_memory_text_weight: float = 1.0,
     memory_prompt_scale: float = 1.0,
+    memory_prompt_mode: str = "task_encoder",
+    memory_prompt_num_tokens: int = 4,
+    memory_prompt_task_temperature: float = 1.0,
     use_free_memory_tokens: bool = False,
     free_memory_num_tokens: int = 4,
 ):
@@ -653,16 +659,31 @@ def build_sam3_image_model(
         inst_predictor = None
 
     memory_prompt_builder = None
-    if use_memory_prompt and static_memory_bank_path is not None:
-        memory_prompt_builder = ImageMemoryPromptBuilder(
+    if use_memory_prompt:
+        task_prompt_builder = ImageMemoryPromptBuilder(
             hidden_dim=256,
             memory_dim=64,
             topk=static_memory_topk,
             image_weight=static_memory_image_weight,
             text_weight=static_memory_text_weight,
             prompt_scale=memory_prompt_scale,
+            prompt_mode=memory_prompt_mode,
+            num_task_tokens=memory_prompt_num_tokens,
+            task_temperature=memory_prompt_task_temperature,
             bank_path=static_memory_bank_path,
         )
+        if use_free_memory_tokens:
+            prompt_tuning_builder = LearnableMemoryPrompt(
+                hidden_dim=256,
+                num_tokens=free_memory_num_tokens,
+                prompt_scale=memory_prompt_scale,
+            )
+            memory_prompt_builder = CombinedMemoryPromptBuilder(
+                task_builder=task_prompt_builder,
+                prompt_tuning_builder=prompt_tuning_builder,
+            )
+        else:
+            memory_prompt_builder = task_prompt_builder
     elif use_free_memory_tokens:
         memory_prompt_builder = LearnableMemoryPrompt(
             hidden_dim=256,

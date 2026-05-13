@@ -35,6 +35,11 @@ def parse_args():
     parser.add_argument("--checkpoint-path", type=Path, default=None)
     parser.add_argument("--static-memory-bank-path", type=Path, default=None)
     parser.add_argument("--free-memory-ckpt", type=Path, default=None)
+    parser.add_argument("--task-encoder-pool-image-dir", type=Path, default=None)
+    parser.add_argument("--task-encoder-pool-mask-dir", type=Path, default=None)
+    parser.add_argument("--task-encoder-sample-count", type=int, default=16)
+    parser.add_argument("--task-encoder-seed", type=int, default=0)
+    parser.add_argument("--task-encoder-batch-size", type=int, default=4)
     parser.add_argument("--text-prompt", type=str, default=None)
     parser.add_argument("--metadata-json", type=Path, default=None)
     parser.add_argument("--static-memory-text-weight", type=float, default=1.0)
@@ -280,6 +285,10 @@ def load_image_tensor(path: Path, transform, device: str):
     return tensor
 
 
+def load_image_batch(paths, transform, device: str):
+    return torch.cat([load_image_tensor(path, transform, device) for path in paths], dim=0)
+
+
 def load_mask_tensor(path: Path, image_size: int, device: str):
     if path.suffix.lower() == ".npy":
         mask_np = np.load(path)
@@ -302,6 +311,10 @@ def load_mask_tensor(path: Path, image_size: int, device: str):
     mask_tensor = F.interpolate(mask_tensor, size=(image_size, image_size), mode="nearest")
     mask_tensor = (mask_tensor > 0.5).float().to(device)
     return mask_tensor
+
+
+def load_mask_batch(paths, image_size: int, device: str):
+    return torch.cat([load_mask_tensor(path, image_size, device) for path in paths], dim=0)
 
 
 def build_box_prompt(mask_tensor: torch.Tensor, image_size: int):
@@ -449,6 +462,27 @@ def load_image_model_with_memory(
     return model, processor
 
 
+def load_image_model_with_task_encoder(
+    checkpoint_path: Path | None,
+    device: str,
+    free_memory_ckpt: Path | None = None,
+    free_memory_num_tokens: int = 4,
+):
+    model = build_sam3_image_model(
+        checkpoint_path=None if checkpoint_path is None else str(checkpoint_path),
+        load_from_HF=False,
+        device=device,
+        eval_mode=True,
+        use_memory_prompt=True,
+        use_free_memory_tokens=free_memory_ckpt is not None,
+        free_memory_num_tokens=free_memory_num_tokens,
+    )
+    if free_memory_ckpt is not None:
+        _load_free_memory_state_into_model(model, free_memory_ckpt)
+    processor = Sam3Processor(model, device=device)
+    return model, processor
+
+
 def load_image_model_with_free_memory(
     checkpoint_path: Path | None,
     device: str,
@@ -465,6 +499,12 @@ def load_image_model_with_free_memory(
     )
     payload = torch.load(free_memory_ckpt, map_location="cpu")
     state = payload.get("memory_prompt_builder", payload)
+    if any(key.startswith("prompt_tuning_builder.") for key in state):
+        state = {
+            key.replace("prompt_tuning_builder.", "", 1): value
+            for key, value in state.items()
+            if key.startswith("prompt_tuning_builder.")
+        }
     missing_keys, unexpected_keys = model.memory_prompt_builder.load_state_dict(
         state,
         strict=False,
@@ -475,6 +515,118 @@ def load_image_model_with_free_memory(
         print(f"Unexpected keys while loading free memory tokens: {unexpected_keys}")
     processor = Sam3Processor(model, device=device)
     return model, processor
+
+
+def _load_free_memory_state_into_model(model, free_memory_ckpt: Path):
+    payload = torch.load(free_memory_ckpt, map_location="cpu")
+    state = payload.get("memory_prompt_builder", payload)
+    target_builder = getattr(model, "memory_prompt_builder", None)
+    if target_builder is None:
+        raise RuntimeError("Model does not have a memory_prompt_builder")
+    if hasattr(target_builder, "prompt_tuning_builder") and target_builder.prompt_tuning_builder is not None:
+        target_builder = target_builder.prompt_tuning_builder
+    if any(key.startswith("prompt_tuning_builder.") for key in state):
+        state = {
+            key.replace("prompt_tuning_builder.", "", 1): value
+            for key, value in state.items()
+            if key.startswith("prompt_tuning_builder.")
+        }
+    missing_keys, unexpected_keys = target_builder.load_state_dict(state, strict=False)
+    if missing_keys:
+        print(f"Missing keys while loading free memory tokens: {missing_keys}")
+    if unexpected_keys:
+        print(f"Unexpected keys while loading free memory tokens: {unexpected_keys}")
+
+
+def load_image_model_with_memory_and_free_memory(
+    checkpoint_path: Path | None,
+    device: str,
+    static_memory_bank_path: Path,
+    free_memory_ckpt: Path,
+    static_memory_topk: int = 4,
+    static_memory_text_weight: float = 1.0,
+    free_memory_num_tokens: int = 4,
+):
+    model = build_sam3_image_model(
+        checkpoint_path=None if checkpoint_path is None else str(checkpoint_path),
+        load_from_HF=False,
+        device=device,
+        eval_mode=True,
+        use_memory_prompt=True,
+        static_memory_bank_path=str(static_memory_bank_path),
+        static_memory_topk=static_memory_topk,
+        static_memory_text_weight=static_memory_text_weight,
+        use_free_memory_tokens=True,
+        free_memory_num_tokens=free_memory_num_tokens,
+    )
+    _load_free_memory_state_into_model(model, free_memory_ckpt)
+    processor = Sam3Processor(model, device=device)
+    return model, processor
+
+
+def sample_task_pool(pairs, sample_count: int, seed: int):
+    if sample_count <= 0 or sample_count >= len(pairs):
+        return list(pairs)
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(len(pairs), size=sample_count, replace=False)
+    return [pairs[int(index)] for index in indices]
+
+
+@torch.inference_mode()
+def encode_task_pool(
+    model,
+    pairs,
+    transform,
+    device: str,
+    image_size: int,
+    batch_size: int,
+):
+    task_embeddings = []
+    memory_keys = []
+    was_training = model.training
+    model.eval()
+    for batch in batch_items(pairs, batch_size):
+        image_paths = [image_path for image_path, _ in batch]
+        mask_paths = [mask_path for _, mask_path in batch]
+        images = load_image_batch(image_paths, transform, device)
+        masks = load_mask_batch(mask_paths, image_size, device)
+        backbone_out = model.backbone.forward_image(images)
+        img_ids = torch.arange(len(batch), device=device, dtype=torch.long)
+        _, img_feats, _, feat_sizes = model._get_img_feats(backbone_out, img_ids)
+        top_feat = img_feats[-1]
+        height, width = feat_sizes[-1]
+        channels = top_feat.shape[-1]
+        pix_feat = top_feat.permute(1, 2, 0).reshape(len(batch), channels, height, width)
+        support_mask = F.interpolate(masks.float(), size=(height, width), mode="nearest")
+        mask_sum = support_mask.sum(dim=(2, 3), keepdim=True).clamp_min(1.0)
+        foreground = (pix_feat * support_mask).sum(dim=(2, 3), keepdim=True) / mask_sum
+        foreground = foreground.flatten(1)
+        context = pix_feat.mean(dim=(2, 3))
+        task_embeddings.append(torch.stack([foreground, context], dim=1).detach().cpu())
+        memory_keys.append(context.detach().cpu())
+    if was_training:
+        model.train()
+    return torch.cat(task_embeddings, dim=0), torch.cat(memory_keys, dim=0)
+
+
+def batch_items(items, batch_size: int):
+    if batch_size <= 0:
+        raise ValueError("--task-encoder-batch-size must be positive")
+    for start in range(0, len(items), batch_size):
+        yield items[start : start + batch_size]
+
+
+def inject_task_pool(model, task_embeddings: torch.Tensor, memory_keys: torch.Tensor, device: str):
+    builder = getattr(model, "memory_prompt_builder", None)
+    if builder is None:
+        raise RuntimeError("Model does not have a memory_prompt_builder")
+    task_builder = getattr(builder, "task_builder", builder)
+    if not hasattr(task_builder, "set_task_support"):
+        raise RuntimeError("memory_prompt_builder does not support task-pool injection")
+    task_builder.set_task_support(
+        task_embeddings.to(device),
+        memory_keys.to(device),
+    )
 
 
 @torch.inference_mode()
@@ -560,6 +712,17 @@ def main():
         pairs = pairs[: args.limit]
     if not pairs:
         raise RuntimeError("No image/mask pairs found. Check filenames and directories.")
+    use_task_encoder = (
+        args.task_encoder_pool_image_dir is not None
+        or args.task_encoder_pool_mask_dir is not None
+    )
+    if use_task_encoder and (
+        args.task_encoder_pool_image_dir is None
+        or args.task_encoder_pool_mask_dir is None
+    ):
+        raise ValueError(
+            "--task-encoder-pool-image-dir and --task-encoder-pool-mask-dir must be provided together"
+        )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     if args.save_predictions:
@@ -584,7 +747,53 @@ def main():
     static_tracker = None
     static_image_model = None
     static_processor = None
-    if args.free_memory_ckpt is not None:
+    if use_task_encoder:
+        static_image_model, static_processor = load_image_model_with_task_encoder(
+            args.checkpoint_path,
+            args.device,
+            free_memory_ckpt=args.free_memory_ckpt,
+            free_memory_num_tokens=args.free_memory_num_tokens,
+        )
+        task_pairs, task_missing_masks = collect_pairs(
+            args.task_encoder_pool_image_dir,
+            args.task_encoder_pool_mask_dir,
+            args.extensions,
+            image_stem_prefix=args.image_stem_prefix,
+            image_stem_suffix=args.image_stem_suffix,
+            mask_stem_prefix=args.mask_stem_prefix,
+            mask_stem_suffix=args.mask_stem_suffix,
+            pairing_mode=args.pairing_mode,
+        )
+        if not task_pairs:
+            raise RuntimeError("No image/mask pairs found in task encoder pool.")
+        sampled_task_pairs = sample_task_pool(
+            task_pairs,
+            args.task_encoder_sample_count,
+            args.task_encoder_seed,
+        )
+        task_embeddings, memory_keys = encode_task_pool(
+            static_image_model,
+            sampled_task_pairs,
+            image_transform,
+            args.device,
+            args.image_size,
+            args.task_encoder_batch_size,
+        )
+        inject_task_pool(static_image_model, task_embeddings, memory_keys, args.device)
+        print(
+            f"Injected task encoder pool with {len(sampled_task_pairs)} sampled train cases"
+        )
+    elif args.free_memory_ckpt is not None and args.static_memory_bank_path is not None:
+        static_image_model, static_processor = load_image_model_with_memory_and_free_memory(
+            args.checkpoint_path,
+            args.device,
+            static_memory_bank_path=args.static_memory_bank_path,
+            free_memory_ckpt=args.free_memory_ckpt,
+            static_memory_topk=args.static_memory_topk,
+            static_memory_text_weight=args.static_memory_text_weight,
+            free_memory_num_tokens=args.free_memory_num_tokens,
+        )
+    elif args.free_memory_ckpt is not None:
         static_image_model, static_processor = load_image_model_with_free_memory(
             args.checkpoint_path,
             args.device,
@@ -690,7 +899,7 @@ def main():
                         args.image_size,
                     )
                     static_pred = static_pred.to(gt_mask.device)
-                    memory_strategy = "memory_refine"
+                    memory_strategy = "task_encoder_refine" if use_task_encoder else "memory_refine"
             else:
                 static_tracker.set_static_memory_text_prompt(text_prompt)
                 static_pred = predict_mask(static_tracker, image_tensor, point_inputs)
@@ -700,9 +909,12 @@ def main():
                 "dice": dice_score(static_pred, gt_mask),
                 "iou": iou_score(static_pred, gt_mask),
             }
+            result["task_encoder"] = result["static_memory"]
             if static_score is not None:
                 result["static_memory"]["score"] = static_score
+                result["task_encoder"]["score"] = static_score
             result["static_memory"]["strategy"] = memory_strategy
+            result["task_encoder"]["strategy"] = memory_strategy
         else:
             static_pred = None
 
@@ -727,8 +939,24 @@ def main():
             if (static_tracker is not None or static_image_model is not None)
             else None
         ),
+        "task_encoder_mean": (
+            summarize_metrics(case_results, "task_encoder")
+            if use_task_encoder
+            else None
+        ),
         "cases": case_results,
         "missing_masks": missing_masks,
+        "task_encoder_pool": (
+            {
+                "image_dir": str(args.task_encoder_pool_image_dir),
+                "mask_dir": str(args.task_encoder_pool_mask_dir),
+                "sample_count": args.task_encoder_sample_count,
+                "seed": args.task_encoder_seed,
+                "missing_masks": task_missing_masks,
+            }
+            if use_task_encoder
+            else None
+        ),
     }
     summary_path = args.output_dir / "metrics.json"
     summary_path.write_text(json.dumps(summary, indent=2))

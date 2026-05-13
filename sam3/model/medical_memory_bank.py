@@ -28,6 +28,7 @@ class StaticMedicalMemoryBank:
         "memory_features": [N, C_mem, H, W],
         "memory_pos_enc": [N, C_mem, H, W],
         "memory_keys": [N, C_mem],  # optional
+        "task_embeddings": [N, T, C],  # optional
         "metadata": ...             # optional
     }
     """
@@ -39,6 +40,7 @@ class StaticMedicalMemoryBank:
         self.memory_pos_enc = None
         self.memory_keys = None
         self.memory_text_keys = None
+        self.task_embeddings = None
         self.metadata = None
         if bank_path is not None:
             self.load(bank_path)
@@ -61,6 +63,9 @@ class StaticMedicalMemoryBank:
         self.memory_text_keys = payload.get("memory_text_keys")
         if self.memory_text_keys is not None:
             self.memory_text_keys = self.memory_text_keys.float().contiguous()
+        self.task_embeddings = payload.get("task_embeddings")
+        if self.task_embeddings is not None:
+            self.task_embeddings = self.task_embeddings.float().contiguous()
         self.metadata = payload.get("metadata")
         self.bank_path = path
         return self

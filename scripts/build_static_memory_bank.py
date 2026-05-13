@@ -275,12 +275,27 @@ def encode_pair(tracker, image_tensor, mask_tensor, text_prompt=None):
     memory_features = maskmem_out["vision_features"].detach().cpu()
     memory_pos_enc = maskmem_out["vision_pos_enc"][-1].detach().cpu()
     memory_keys = F.adaptive_avg_pool2d(memory_features, output_size=1).flatten(1)
+    mask_for_task = F.interpolate(
+        mask_tensor.float(),
+        size=pix_feat.shape[-2:],
+        mode="nearest",
+    )
+    mask_sum = mask_for_task.sum(dim=(2, 3), keepdim=True).clamp_min(1.0)
+    foreground_token = (pix_feat * mask_for_task).sum(dim=(2, 3), keepdim=True) / mask_sum
+    context_token = pix_feat.mean(dim=(2, 3), keepdim=True)
+    task_embeddings = torch.stack(
+        [
+            foreground_token.flatten(1).squeeze(0).detach().cpu(),
+            context_token.flatten(1).squeeze(0).detach().cpu(),
+        ],
+        dim=0,
+    )
     memory_text_keys = None
     if text_prompt is not None and getattr(tracker.backbone, "language_backbone", None) is not None:
         text_outputs = tracker.backbone.forward_text([text_prompt], device=image_tensor.device)
         language_features = text_outputs["language_features"]
         memory_text_keys = language_features.mean(dim=0).detach().cpu()
-    return memory_features, memory_pos_enc, memory_keys, memory_text_keys
+    return memory_features, memory_pos_enc, memory_keys, memory_text_keys, task_embeddings
 
 
 def _normalize_rows(x: torch.Tensor) -> torch.Tensor:
@@ -323,13 +338,14 @@ def aggregate_to_prototypes(
     memory_pos_enc: torch.Tensor,
     memory_keys: torch.Tensor,
     memory_text_keys: torch.Tensor | None,
+    task_embeddings: torch.Tensor | None,
     metadata: list[dict],
     prototype_count: int,
     prototype_grouping: str,
     prototype_iters: int,
 ):
     if prototype_count <= 0 or memory_features.shape[0] <= prototype_count:
-        return memory_features, memory_pos_enc, memory_keys, memory_text_keys, metadata
+        return memory_features, memory_pos_enc, memory_keys, memory_text_keys, task_embeddings, metadata
 
     if prototype_grouping == "per_text":
         groups = {}
@@ -343,6 +359,7 @@ def aggregate_to_prototypes(
     proto_pos_enc = []
     proto_keys = []
     proto_text_keys = []
+    proto_task_embeddings = []
     proto_metadata = []
 
     for group_name, group_indices in groups.items():
@@ -351,6 +368,9 @@ def aggregate_to_prototypes(
         group_keys = memory_keys[group_indices]
         group_text_keys = (
             None if memory_text_keys is None else memory_text_keys[group_indices]
+        )
+        group_task_embeddings = (
+            None if task_embeddings is None else task_embeddings[group_indices]
         )
 
         group_k = min(prototype_count, len(group_indices))
@@ -378,6 +398,10 @@ def aggregate_to_prototypes(
             proto_keys.append(_normalize_rows(cluster_keys.mean(dim=0, keepdim=True)))
             if group_text_keys is not None:
                 proto_text_keys.append(group_text_keys[member_mask].mean(dim=0, keepdim=True))
+            if group_task_embeddings is not None:
+                proto_task_embeddings.append(
+                    group_task_embeddings[member_mask].mean(dim=0, keepdim=True)
+                )
             proto_metadata.append(
                 {
                     "prototype_group": group_name,
@@ -393,6 +417,7 @@ def aggregate_to_prototypes(
         torch.cat(proto_pos_enc, dim=0),
         torch.cat(proto_keys, dim=0),
         torch.cat(proto_text_keys, dim=0) if proto_text_keys else None,
+        torch.cat(proto_task_embeddings, dim=0) if proto_task_embeddings else None,
         proto_metadata,
     )
 
@@ -419,6 +444,7 @@ def main():
     memory_pos_enc = []
     memory_keys = []
     memory_text_keys = []
+    task_embeddings = []
     metadata = []
 
     for idx, (image_path, mask_path) in enumerate(pairs, start=1):
@@ -433,7 +459,7 @@ def main():
                 fmt=args.prompt_format,
                 separator=args.prompt_separator,
             )
-        feats, pos_enc, keys, text_keys = encode_pair(
+        feats, pos_enc, keys, text_keys, task_tokens = encode_pair(
             tracker,
             image_tensor,
             mask_tensor,
@@ -444,6 +470,7 @@ def main():
         memory_keys.append(keys)
         if text_keys is not None:
             memory_text_keys.append(text_keys)
+        task_embeddings.append(task_tokens)
         metadata.append(
             {
                 "index": idx - 1,
@@ -464,6 +491,7 @@ def main():
             if len(memory_text_keys) == len(metadata)
             else None
         ),
+        "task_embeddings": torch.stack(task_embeddings, dim=0),
         "metadata": metadata,
         "config": {
             "image_size": args.image_size,
@@ -477,12 +505,14 @@ def main():
         payload["memory_pos_enc"],
         payload["memory_keys"],
         payload["memory_text_keys"],
+        payload["task_embeddings"],
         payload["metadata"],
     ) = aggregate_to_prototypes(
         memory_features=payload["memory_features"],
         memory_pos_enc=payload["memory_pos_enc"],
         memory_keys=payload["memory_keys"],
         memory_text_keys=payload["memory_text_keys"],
+        task_embeddings=payload["task_embeddings"],
         metadata=payload["metadata"],
         prototype_count=args.prototype_count,
         prototype_grouping=args.prototype_grouping,

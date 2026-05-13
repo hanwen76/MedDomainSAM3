@@ -44,6 +44,14 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
+        "--use-task-encoder",
+        action="store_true",
+        help="Randomly sample the train dataset as an internal task-embedding pool.",
+    )
+    parser.add_argument("--task-encoder-sample-count", type=int, default=16)
+    parser.add_argument("--task-encoder-seed", type=int, default=0)
+    parser.add_argument("--task-encoder-batch-size", type=int, default=4)
+    parser.add_argument(
         "--image-stem-suffix",
         type=str,
         default="",
@@ -328,6 +336,71 @@ def batch_items(items, batch_size: int):
         yield items[start : start + batch_size]
 
 
+def sample_task_pool(pairs, sample_count: int, seed: int):
+    if sample_count <= 0 or sample_count >= len(pairs):
+        return list(pairs)
+    rng = np.random.default_rng(seed)
+    indices = rng.choice(len(pairs), size=sample_count, replace=False)
+    return [pairs[int(index)] for index in indices]
+
+
+@torch.inference_mode()
+def encode_task_pool(
+    model,
+    pairs,
+    transform,
+    device: str,
+    image_size: int,
+    batch_size: int,
+):
+    task_embeddings = []
+    memory_keys = []
+    was_training = model.training
+    model.eval()
+    for batch in batch_items(pairs, batch_size):
+        image_paths = [image_path for image_path, _ in batch]
+        mask_paths = [mask_path for _, mask_path in batch]
+        images = load_image_batch(image_paths, transform, device)
+        masks = load_mask_batch(mask_paths, image_size, device)
+        backbone_out = model.backbone.forward_image(images)
+        img_ids = torch.arange(len(batch), device=device, dtype=torch.long)
+        _, img_feats, _, feat_sizes = model._get_img_feats(backbone_out, img_ids)
+        top_feat = img_feats[-1]
+        height, width = feat_sizes[-1]
+        channels = top_feat.shape[-1]
+        pix_feat = top_feat.permute(1, 2, 0).reshape(len(batch), channels, height, width)
+        support_mask = F.interpolate(masks.float(), size=(height, width), mode="nearest")
+        mask_sum = support_mask.sum(dim=(2, 3), keepdim=True).clamp_min(1.0)
+        foreground = (pix_feat * support_mask).sum(dim=(2, 3), keepdim=True) / mask_sum
+        foreground = foreground.flatten(1)
+        context = pix_feat.mean(dim=(2, 3))
+        task_embeddings.append(torch.stack([foreground, context], dim=1).detach().cpu())
+        memory_keys.append(context.detach().cpu())
+    if was_training:
+        model.train()
+    return torch.cat(task_embeddings, dim=0), torch.cat(memory_keys, dim=0)
+
+
+def inject_task_pool(model, task_embeddings: torch.Tensor, memory_keys: torch.Tensor, device: str):
+    builder = getattr(model, "memory_prompt_builder", None)
+    if builder is None:
+        raise RuntimeError("Model does not have a memory_prompt_builder")
+    task_builder = getattr(builder, "task_builder", builder)
+    if not hasattr(task_builder, "set_task_support"):
+        raise RuntimeError("memory_prompt_builder does not support task-pool injection")
+    task_builder.set_task_support(
+        task_embeddings.to(device),
+        memory_keys.to(device),
+    )
+
+
+def get_prompt_tuning_builder(model):
+    builder = getattr(model, "memory_prompt_builder", None)
+    if builder is None:
+        return None
+    return getattr(builder, "prompt_tuning_builder", builder)
+
+
 def main():
     args = parse_args()
     pairs = collect_pairs(
@@ -358,20 +431,37 @@ def main():
         load_from_HF=False,
         device=args.device,
         eval_mode=True,
+        use_memory_prompt=args.use_task_encoder,
         use_free_memory_tokens=True,
         free_memory_num_tokens=args.num_tokens,
     )
     model.eval()
 
+    if args.use_task_encoder:
+        task_pairs = sample_task_pool(pairs, args.task_encoder_sample_count, args.task_encoder_seed)
+        task_embeddings, memory_keys = encode_task_pool(
+            model,
+            task_pairs,
+            transform,
+            args.device,
+            args.image_size,
+            args.task_encoder_batch_size,
+        )
+        inject_task_pool(model, task_embeddings, memory_keys, args.device)
+        print(f"Injected task encoder pool with {len(task_pairs)} sampled train cases")
+
     for param in model.parameters():
         param.requires_grad = False
     if model.memory_prompt_builder is None:
         raise RuntimeError("Free memory prompt builder was not created")
-    for param in model.memory_prompt_builder.parameters():
+    prompt_tuning_builder = get_prompt_tuning_builder(model)
+    if prompt_tuning_builder is None or not hasattr(prompt_tuning_builder, "memory_tokens"):
+        raise RuntimeError("Learnable prompt tuning builder was not created")
+    for param in prompt_tuning_builder.parameters():
         param.requires_grad = True
-    model.memory_prompt_builder.train()
+    prompt_tuning_builder.train()
 
-    optimizer = torch.optim.AdamW(model.memory_prompt_builder.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(prompt_tuning_builder.parameters(), lr=args.lr)
 
     history = []
     for epoch in range(args.epochs):
@@ -429,7 +519,7 @@ def main():
 
             bce = F.binary_cross_entropy_with_logits(selected_logits, target)
             dice = dice_loss_from_logits(selected_logits, target)
-            tokens = model.memory_prompt_builder.memory_tokens
+            tokens = prompt_tuning_builder.memory_tokens
             reg_l2 = token_l2_regularization(tokens)
             reg_div = token_diversity_regularization(tokens)
             loss = (
@@ -449,7 +539,7 @@ def main():
         print(f"Epoch {epoch + 1}/{args.epochs} - loss: {epoch_loss:.6f}")
 
     payload = {
-        "memory_prompt_builder": model.memory_prompt_builder.state_dict(),
+        "memory_prompt_builder": prompt_tuning_builder.state_dict(),
         "config": {
             "num_tokens": args.num_tokens,
             "batch_size": args.batch_size,
@@ -459,6 +549,9 @@ def main():
             "token_l2_weight": args.token_l2_weight,
             "token_diversity_weight": args.token_diversity_weight,
             "prompt_system_mode": args.prompt_system_mode,
+            "use_task_encoder": args.use_task_encoder,
+            "task_encoder_sample_count": args.task_encoder_sample_count,
+            "task_encoder_seed": args.task_encoder_seed,
             "prompt_topk_attrs": args.prompt_topk_attrs,
             "prompt_format": args.prompt_format,
             "prompt_separator": args.prompt_separator,

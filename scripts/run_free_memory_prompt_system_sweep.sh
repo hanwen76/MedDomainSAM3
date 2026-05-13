@@ -53,6 +53,10 @@ PROMPT_CANDIDATE_INCLUDE_CANONICAL="${PROMPT_CANDIDATE_INCLUDE_CANONICAL:-1}"
 PROMPT_CANDIDATE_INCLUDE_EXPANDED="${PROMPT_CANDIDATE_INCLUDE_EXPANDED:-1}"
 PROMPT_CANDIDATE_INCLUDE_DESCRIPTIONS="${PROMPT_CANDIDATE_INCLUDE_DESCRIPTIONS:-1}"
 PROMPT_CANDIDATE_LIMIT="${PROMPT_CANDIDATE_LIMIT:-}"
+USE_TASK_ENCODER="${USE_TASK_ENCODER:-0}"
+TASK_ENCODER_SAMPLE_COUNT="${TASK_ENCODER_SAMPLE_COUNT:-16}"
+TASK_ENCODER_SEED="${TASK_ENCODER_SEED:-0}"
+TASK_ENCODER_BATCH_SIZE="${TASK_ENCODER_BATCH_SIZE:-4}"
 ATTR_JSON="${ATTR_JSON:-$PROJECT_ROOT/scripts/prompt_templates/attributes_template.json}"
 ALIAS_JSON="${ALIAS_JSON:-$PROJECT_ROOT/scripts/prompt_templates/aliases_template.json}"
 STAGES="${STAGES:-train,eval}"
@@ -263,6 +267,14 @@ train_one() {
   if [[ -n "$TRAIN_LIMIT" ]]; then
     cmd+=(--limit "$TRAIN_LIMIT")
   fi
+  if [[ "$USE_TASK_ENCODER" != "0" ]]; then
+    cmd+=(
+      --use-task-encoder
+      --task-encoder-sample-count "$TASK_ENCODER_SAMPLE_COUNT"
+      --task-encoder-seed "$TASK_ENCODER_SEED"
+      --task-encoder-batch-size "$TASK_ENCODER_BATCH_SIZE"
+    )
+  fi
 
   echo "[TRAIN][$dataset][$site][$output_group/$prompt_mode] ${cmd[*]}"
   "${cmd[@]}"
@@ -290,6 +302,8 @@ eval_one() {
 
   local image_dir="$base_dir/$site/val_data_npy"
   local mask_dir="$base_dir/$site/val_label_npy"
+  local pool_image_dir="$base_dir/$site/data_npy"
+  local pool_mask_dir="$base_dir/$site/label_npy"
   local output_dir="$OUT_ROOT/$dataset/$output_group/$site"
   if [[ -n "$variant_label" ]]; then
     output_dir="$output_dir/$variant_label"
@@ -324,6 +338,18 @@ eval_one() {
     --attributes-json "$ATTR_JSON"
     --aliases-json "$ALIAS_JSON"
   )
+  if [[ -n "$EVAL_LIMIT" ]]; then
+    cmd+=(--limit "$EVAL_LIMIT")
+  fi
+  if [[ "$USE_TASK_ENCODER" != "0" ]]; then
+    cmd+=(
+      --task-encoder-pool-image-dir "$pool_image_dir"
+      --task-encoder-pool-mask-dir "$pool_mask_dir"
+      --task-encoder-sample-count "$TASK_ENCODER_SAMPLE_COUNT"
+      --task-encoder-seed "$TASK_ENCODER_SEED"
+      --task-encoder-batch-size "$TASK_ENCODER_BATCH_SIZE"
+    )
+  fi
 
   echo "[EVAL][$dataset][$site][$output_group/$prompt_mode] ${cmd[*]}"
   "${cmd[@]}"
