@@ -27,6 +27,7 @@ for path in (PROJECT_ROOT, SCRIPTS_DIR):
 from sam3.model.data_misc import FindStage
 from sam3.model.geometry_encoders import Prompt
 from sam3.model_builder import build_sam3_image_model
+from prompt_system import PromptSystem
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".npy"}
@@ -47,6 +48,22 @@ def parse_args():
     parser.add_argument("--site-names", nargs="+", default=None)
     parser.add_argument("--text-prompt", type=str, default=None)
     parser.add_argument("--metadata-json", type=Path, default=None)
+    parser.add_argument(
+        "--prompt-system-mode",
+        type=str,
+        default="raw",
+        choices=["raw", "canonical", "expanded"],
+    )
+    parser.add_argument("--attributes-json", type=Path, default=None)
+    parser.add_argument("--aliases-json", type=Path, default=None)
+    parser.add_argument("--prompt-topk-attrs", type=int, default=3)
+    parser.add_argument(
+        "--prompt-format",
+        type=str,
+        default="attrs_then_class",
+        choices=["attrs_then_class", "class_then_attrs"],
+    )
+    parser.add_argument("--prompt-separator", type=str, default=", ")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--image-size", type=int, default=1008)
     # Free memory token args
@@ -76,6 +93,11 @@ def parse_args():
     parser.add_argument("--no-object-threshold", type=float, default=0.2)
     parser.add_argument("--memory-trigger-threshold", type=float, default=0.8)
     parser.add_argument("--save-predictions", action="store_true")
+    parser.add_argument(
+        "--skip-eval",
+        action="store_true",
+        help="Only train and save FedAvg free memory tokens; skip holdout evaluation.",
+    )
     parser.add_argument(
         "--extensions",
         nargs="+",
@@ -253,6 +275,13 @@ def train_one_epoch(
         image = load_image(image_path, transform, args.device)
         target = load_mask(mask_path, args.image_size, args.device)
         text_prompt = resolve_text(image_path.stem, metadata, args.text_prompt)
+        text_prompt = args.prompt_system.transform_prompt(
+            text_prompt,
+            mode=args.prompt_system_mode,
+            topk_attrs=args.prompt_topk_attrs,
+            fmt=args.prompt_format,
+            separator=args.prompt_separator,
+        )
 
         backbone_out = model.backbone.forward_image(image)
         backbone_out.update(model.backbone.forward_text([text_prompt], device=args.device))
@@ -468,6 +497,14 @@ def run_single_holdout(args, holdout_site: Path, site_dirs, metadata_map):
     }, aggregated_path)
     print(f"Saved aggregated model to {aggregated_path}")
 
+    if args.skip_eval:
+        return {
+            "holdout_site": holdout_site.name,
+            "num_cases": 0,
+            "baseline_mean": {"dice": 0.0, "iou": 0.0},
+            "fedavg_mean": {"dice": 0.0, "iou": 0.0},
+        }
+
     # Evaluate on holdout site
     return evaluate_holdout_site(
         args=args,
@@ -524,6 +561,13 @@ def evaluate_holdout_site(
     for idx, (image_path, mask_path) in enumerate(pairs, start=1):
         gt_mask = load_mask(mask_path, args.image_size, args.device)
         text_prompt = resolve_text(image_path.stem, metadata_map, args.text_prompt)
+        text_prompt = args.prompt_system.transform_prompt(
+            text_prompt,
+            mode=args.prompt_system_mode,
+            topk_attrs=args.prompt_topk_attrs,
+            fmt=args.prompt_format,
+            separator=args.prompt_separator,
+        )
 
         # Baseline prediction
         baseline_pred, baseline_score = predict_mask_with_text(
@@ -606,6 +650,10 @@ def main():
         raise RuntimeError("Need at least two valid client/site directories under dataset-root.")
 
     metadata_map = load_metadata(args.metadata_json)
+    args.prompt_system = PromptSystem.from_paths(
+        attributes_json=args.attributes_json,
+        aliases_json=args.aliases_json,
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     if args.run_all_holdouts:
