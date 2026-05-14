@@ -167,9 +167,10 @@ class ImageMemoryPromptBuilder(nn.Module):
         self.query_context_proj = self.query_context_proj.to(target_device)
         self.memory_prompt_proj = self.memory_prompt_proj.to(target_device)
         self.task_bank_proj = self.task_bank_proj.to(target_device)
-        self.task_query_tokens = nn.Parameter(
-            self.task_query_tokens.detach().to(target_device)
-        )
+        if self.task_query_tokens.device != target_device:
+            self.task_query_tokens = nn.Parameter(
+                self.task_query_tokens.detach().to(target_device)
+            )
         self.task_cross_attn = self.task_cross_attn.to(target_device)
         self.task_ffn = self.task_ffn.to(target_device)
         self.task_norm1 = self.task_norm1.to(target_device)
@@ -293,7 +294,14 @@ class ImageMemoryPromptBuilder(nn.Module):
         weights = torch.softmax(scores, dim=-1)  # [B, N]
 
         support_tokens = torch.einsum("bn,ntc->btc", weights, support_bank)
-        task_tokens = support_tokens[:, : self.num_task_tokens, :] * self.prompt_scale
+        support_summary = support_tokens.mean(dim=1)
+        query_context = self.query_context_proj(torch.cat([image_query, text_query], dim=-1))
+        task_queries = self.task_query_tokens.unsqueeze(0).expand(batch_size, -1, -1)
+        task_queries = task_queries + query_context.unsqueeze(1) + support_summary.unsqueeze(1)
+        task_attn, _ = self.task_cross_attn(task_queries, support_tokens, support_tokens)
+        task_tokens = self.task_norm1(task_queries + task_attn)
+        task_tokens = self.task_norm2(task_tokens + self.task_ffn(task_tokens))
+        task_tokens = task_tokens * self.prompt_scale
 
         memory_prompt = task_tokens.permute(1, 0, 2).contiguous()  # [K, B, C]
         memory_mask = torch.zeros(

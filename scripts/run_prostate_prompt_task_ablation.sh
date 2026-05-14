@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Four-way prostate ablation:
+# Five-way prostate ablation:
 # 1. SAM3 baseline with text prompt only
 # 2. SAM3 + federated prompt tuning
-# 3. SAM3 + task encoder
-# 4. SAM3 + federated prompt tuning + task encoder
+# 3. SAM3 + federated prompt tuning + non-trained task encoder
+# 4. SAM3 + federated prompt tuning + trained task encoder
+# 5. SAM3 + trained task encoder
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -26,8 +27,14 @@ LR="${LR:-1e-2}"
 TRAIN_LIMIT="${TRAIN_LIMIT:-100}"
 EVAL_LIMIT="${EVAL_LIMIT:-}"
 TASK_ENCODER_SAMPLE_COUNT="${TASK_ENCODER_SAMPLE_COUNT:-16}"
+TASK_ENCODER_NUM_TOKENS="${TASK_ENCODER_NUM_TOKENS:-4}"
 TASK_ENCODER_SEED="${TASK_ENCODER_SEED:-0}"
 TASK_ENCODER_BATCH_SIZE="${TASK_ENCODER_BATCH_SIZE:-4}"
+TASK_ENCODER_SUPPORT_SIZE="${TASK_ENCODER_SUPPORT_SIZE:-8}"
+TASK_ENCODER_QUERY_BATCH_SIZE="${TASK_ENCODER_QUERY_BATCH_SIZE:-1}"
+TASK_ENCODER_EPOCHS="${TASK_ENCODER_EPOCHS:-$EPOCHS}"
+TASK_ENCODER_LR="${TASK_ENCODER_LR:-1e-3}"
+TASK_ENCODER_LIMIT="${TASK_ENCODER_LIMIT:-$TRAIN_LIMIT}"
 NO_OBJECT_THRESHOLD="${NO_OBJECT_THRESHOLD:-0.2}"
 MEMORY_TRIGGER_THRESHOLD="${MEMORY_TRIGGER_THRESHOLD:-0.8}"
 IMAGE_STEM_PREFIX="${IMAGE_STEM_PREFIX:-}"
@@ -114,6 +121,45 @@ train_federated_prompt_tuning() {
   "${cmd[@]}"
 }
 
+train_task_encoder() {
+  local site="$1"
+  local output_dir="$OUT_ROOT/prostate/trained_task_encoder/$site"
+  local output_path="$output_dir/task_encoder.pt"
+  mkdir -p "$output_dir"
+
+  local cmd=(
+    "$PYTHON_BIN" "$PROJECT_ROOT/scripts/train_task_encoder.py"
+    --image-dir "$DATA_ROOT/$site/data_npy"
+    --mask-dir "$DATA_ROOT/$site/label_npy"
+    --output-path "$output_path"
+    --checkpoint-path "$CKPT"
+    --text-prompt "$TEXT_PROMPT"
+    --device "$DEVICE"
+    --image-size "$IMAGE_SIZE"
+    --num-task-tokens "$TASK_ENCODER_NUM_TOKENS"
+    --support-size "$TASK_ENCODER_SUPPORT_SIZE"
+    --query-batch-size "$TASK_ENCODER_QUERY_BATCH_SIZE"
+    --support-batch-size "$TASK_ENCODER_BATCH_SIZE"
+    --epochs "$TASK_ENCODER_EPOCHS"
+    --lr "$TASK_ENCODER_LR"
+    --image-stem-prefix "$IMAGE_STEM_PREFIX"
+    --image-stem-suffix "$IMAGE_STEM_SUFFIX"
+    --mask-stem-prefix "$MASK_STEM_PREFIX"
+    --mask-stem-suffix "$MASK_STEM_SUFFIX"
+    --pairing-mode "$PAIRING_MODE"
+    --prompt-system-mode "$PROMPT_SYSTEM_MODE"
+    --attributes-json "$ATTR_JSON"
+    --aliases-json "$ALIAS_JSON"
+    --seed "$TASK_ENCODER_SEED"
+  )
+  if [[ -n "$TASK_ENCODER_LIMIT" ]]; then
+    cmd+=(--limit "$TASK_ENCODER_LIMIT")
+  fi
+
+  echo "[TRAIN][prostate][$site][trained_task_encoder] ${cmd[*]}"
+  "${cmd[@]}"
+}
+
 eval_baseline() {
   local site="$1"
   local output_dir="$OUT_ROOT/prostate/baseline/$site/eval"
@@ -136,24 +182,9 @@ eval_prompt_tuning() {
   eval "$cmd"
 }
 
-eval_task_encoder() {
+eval_nontrained_task_encoder_with_prompt_tuning() {
   local site="$1"
-  local output_dir="$OUT_ROOT/prostate/task_encoder/$site/eval"
-  mkdir -p "$output_dir"
-  local cmd
-  cmd="$(common_eval_args "$site" "$output_dir")"
-  cmd="$cmd --task-encoder-pool-image-dir $(printf '%q' "$DATA_ROOT/$site/data_npy")"
-  cmd="$cmd --task-encoder-pool-mask-dir $(printf '%q' "$DATA_ROOT/$site/label_npy")"
-  cmd="$cmd --task-encoder-sample-count $(printf '%q' "$TASK_ENCODER_SAMPLE_COUNT")"
-  cmd="$cmd --task-encoder-seed $(printf '%q' "$TASK_ENCODER_SEED")"
-  cmd="$cmd --task-encoder-batch-size $(printf '%q' "$TASK_ENCODER_BATCH_SIZE")"
-  echo "[EVAL][prostate][$site][task_encoder] $cmd"
-  eval "$cmd"
-}
-
-eval_prompt_tuning_task_encoder() {
-  local site="$1"
-  local output_dir="$OUT_ROOT/prostate/fed_prompt_tuning_task_encoder/$site/eval"
+  local output_dir="$OUT_ROOT/prostate/fed_prompt_tuning_nontrained_task_encoder/$site/eval"
   local free_ckpt="$OUT_ROOT/prostate/fed_prompt_tuning/$site/fedavg_free_memory_tokens.pt"
   mkdir -p "$output_dir"
   local cmd
@@ -164,7 +195,43 @@ eval_prompt_tuning_task_encoder() {
   cmd="$cmd --task-encoder-sample-count $(printf '%q' "$TASK_ENCODER_SAMPLE_COUNT")"
   cmd="$cmd --task-encoder-seed $(printf '%q' "$TASK_ENCODER_SEED")"
   cmd="$cmd --task-encoder-batch-size $(printf '%q' "$TASK_ENCODER_BATCH_SIZE")"
-  echo "[EVAL][prostate][$site][fed_prompt_tuning_task_encoder] $cmd"
+  echo "[EVAL][prostate][$site][fed_prompt_tuning_nontrained_task_encoder] $cmd"
+  eval "$cmd"
+}
+
+eval_trained_task_encoder() {
+  local site="$1"
+  local output_dir="$OUT_ROOT/prostate/trained_task_encoder/$site/eval"
+  local task_ckpt="$OUT_ROOT/prostate/trained_task_encoder/$site/task_encoder.pt"
+  mkdir -p "$output_dir"
+  local cmd
+  cmd="$(common_eval_args "$site" "$output_dir")"
+  cmd="$cmd --task-encoder-pool-image-dir $(printf '%q' "$DATA_ROOT/$site/data_npy")"
+  cmd="$cmd --task-encoder-pool-mask-dir $(printf '%q' "$DATA_ROOT/$site/label_npy")"
+  cmd="$cmd --task-encoder-ckpt $(printf '%q' "$task_ckpt")"
+  cmd="$cmd --task-encoder-sample-count $(printf '%q' "$TASK_ENCODER_SAMPLE_COUNT")"
+  cmd="$cmd --task-encoder-seed $(printf '%q' "$TASK_ENCODER_SEED")"
+  cmd="$cmd --task-encoder-batch-size $(printf '%q' "$TASK_ENCODER_BATCH_SIZE")"
+  echo "[EVAL][prostate][$site][trained_task_encoder] $cmd"
+  eval "$cmd"
+}
+
+eval_prompt_tuning_trained_task_encoder() {
+  local site="$1"
+  local output_dir="$OUT_ROOT/prostate/fed_prompt_tuning_trained_task_encoder/$site/eval"
+  local free_ckpt="$OUT_ROOT/prostate/fed_prompt_tuning/$site/fedavg_free_memory_tokens.pt"
+  local task_ckpt="$OUT_ROOT/prostate/trained_task_encoder/$site/task_encoder.pt"
+  mkdir -p "$output_dir"
+  local cmd
+  cmd="$(common_eval_args "$site" "$output_dir")"
+  cmd="$cmd --free-memory-ckpt $(printf '%q' "$free_ckpt") --free-memory-num-tokens $(printf '%q' "$NUM_TOKENS")"
+  cmd="$cmd --task-encoder-pool-image-dir $(printf '%q' "$DATA_ROOT/$site/data_npy")"
+  cmd="$cmd --task-encoder-pool-mask-dir $(printf '%q' "$DATA_ROOT/$site/label_npy")"
+  cmd="$cmd --task-encoder-ckpt $(printf '%q' "$task_ckpt")"
+  cmd="$cmd --task-encoder-sample-count $(printf '%q' "$TASK_ENCODER_SAMPLE_COUNT")"
+  cmd="$cmd --task-encoder-seed $(printf '%q' "$TASK_ENCODER_SEED")"
+  cmd="$cmd --task-encoder-batch-size $(printf '%q' "$TASK_ENCODER_BATCH_SIZE")"
+  echo "[EVAL][prostate][$site][fed_prompt_tuning_trained_task_encoder] $cmd"
   eval "$cmd"
 }
 
@@ -180,8 +247,9 @@ site = sys.argv[2]
 rows = [
     ("baseline", "baseline_mean"),
     ("fed_prompt_tuning", "static_memory_mean"),
-    ("task_encoder", "task_encoder_mean"),
-    ("fed_prompt_tuning_task_encoder", "task_encoder_mean"),
+    ("fed_prompt_tuning_nontrained_task_encoder", "task_encoder_mean"),
+    ("fed_prompt_tuning_trained_task_encoder", "task_encoder_mean"),
+    ("trained_task_encoder", "task_encoder_mean"),
 ]
 for name, key in rows:
     metrics_path = root / name / site / "eval" / "metrics.json"
@@ -200,11 +268,15 @@ main() {
     train_federated_prompt_tuning
   fi
   for site in $SITES; do
+    if has_stage train; then
+      train_task_encoder "$site"
+    fi
     if has_stage eval; then
       eval_baseline "$site"
       eval_prompt_tuning "$site"
-      eval_task_encoder "$site"
-      eval_prompt_tuning_task_encoder "$site"
+      eval_nontrained_task_encoder_with_prompt_tuning "$site"
+      eval_prompt_tuning_trained_task_encoder "$site"
+      eval_trained_task_encoder "$site"
       summarize_site "$site" | tee "$OUT_ROOT/prostate/$site.summary.tsv"
     fi
   done

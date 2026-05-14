@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument("--free-memory-ckpt", type=Path, default=None)
     parser.add_argument("--task-encoder-pool-image-dir", type=Path, default=None)
     parser.add_argument("--task-encoder-pool-mask-dir", type=Path, default=None)
+    parser.add_argument("--task-encoder-ckpt", type=Path, default=None)
     parser.add_argument("--task-encoder-sample-count", type=int, default=16)
     parser.add_argument("--task-encoder-seed", type=int, default=0)
     parser.add_argument("--task-encoder-batch-size", type=int, default=4)
@@ -629,6 +630,20 @@ def inject_task_pool(model, task_embeddings: torch.Tensor, memory_keys: torch.Te
     )
 
 
+def load_task_encoder_state(model, task_encoder_ckpt: Path):
+    payload = torch.load(task_encoder_ckpt, map_location="cpu")
+    state = payload.get("task_encoder", payload)
+    builder = getattr(model, "memory_prompt_builder", None)
+    task_builder = getattr(builder, "task_builder", builder)
+    if task_builder is None:
+        raise RuntimeError("Model does not have a task encoder builder")
+    missing_keys, unexpected_keys = task_builder.load_state_dict(state, strict=False)
+    if missing_keys:
+        print(f"Missing keys while loading task encoder: {missing_keys}")
+    if unexpected_keys:
+        print(f"Unexpected keys while loading task encoder: {unexpected_keys}")
+
+
 @torch.inference_mode()
 def predict_mask(tracker, image_tensor, point_inputs):
     backbone_out = tracker.forward_image(image_tensor)
@@ -780,6 +795,8 @@ def main():
             args.task_encoder_batch_size,
         )
         inject_task_pool(static_image_model, task_embeddings, memory_keys, args.device)
+        if args.task_encoder_ckpt is not None:
+            load_task_encoder_state(static_image_model, args.task_encoder_ckpt)
         print(
             f"Injected task encoder pool with {len(sampled_task_pairs)} sampled train cases"
         )
@@ -952,6 +969,11 @@ def main():
                 "mask_dir": str(args.task_encoder_pool_mask_dir),
                 "sample_count": args.task_encoder_sample_count,
                 "seed": args.task_encoder_seed,
+                "checkpoint": (
+                    None
+                    if args.task_encoder_ckpt is None
+                    else str(args.task_encoder_ckpt)
+                ),
                 "missing_masks": task_missing_masks,
             }
             if use_task_encoder
