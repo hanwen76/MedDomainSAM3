@@ -7,6 +7,9 @@ set -euo pipefail
 # 3. SAM3 + federated prompt tuning + non-trained task encoder
 # 4. SAM3 + federated prompt tuning + trained task encoder
 # 5. SAM3 + trained task encoder
+# EPOCHS=10 CUDA_VISIBLE_DEVICES=2 bash scripts/run_prostate_prompt_task_ablation.sh
+export CKPT=/home/zhanghanwen/checkpoints/sam3.pt
+export OUT_ROOT=/home/zhanghanwen/text-fedsam3
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -24,7 +27,7 @@ NUM_TOKENS="${NUM_TOKENS:-4}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 EPOCHS="${EPOCHS:-5}"
 LR="${LR:-1e-2}"
-TRAIN_LIMIT="${TRAIN_LIMIT:-100}"
+TRAIN_LIMIT="${TRAIN_LIMIT:-10000}"
 EVAL_LIMIT="${EVAL_LIMIT:-}"
 TASK_ENCODER_SAMPLE_COUNT="${TASK_ENCODER_SAMPLE_COUNT:-16}"
 TASK_ENCODER_NUM_TOKENS="${TASK_ENCODER_NUM_TOKENS:-4}"
