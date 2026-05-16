@@ -103,6 +103,17 @@ def parse_args():
         nargs="+",
         default=[".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".npy"],
     )
+    parser.add_argument("--image-stem-prefix", type=str, default="")
+    parser.add_argument("--image-stem-suffix", type=str, default="")
+    parser.add_argument("--mask-stem-prefix", type=str, default="")
+    parser.add_argument("--mask-stem-suffix", type=str, default="")
+    parser.add_argument(
+        "--pairing-mode",
+        type=str,
+        default="stem",
+        choices=["stem", "sequential"],
+        help="How to pair images and masks. Sequential pairing matches sorted files by order.",
+    )
     return parser.parse_args()
 
 
@@ -121,31 +132,88 @@ def discover_sites(dataset_root: Path, site_names: list[str] | None):
     return valid_sites
 
 
-def collect_pairs(image_dir: Path, mask_dir: Path, extensions):
+def normalize_stem(stem: str, prefix_to_strip: str = "", suffix_to_strip: str = ""):
+    if prefix_to_strip and stem.startswith(prefix_to_strip):
+        stem = stem[len(prefix_to_strip) :]
+    if suffix_to_strip and stem.endswith(suffix_to_strip):
+        stem = stem[: -len(suffix_to_strip)]
+    return stem
+
+
+def natural_sort_key(path: Path):
+    import re
+
+    parts = re.split(r"(\d+)", str(path))
+    return [int(part) if part.isdigit() else part.lower() for part in parts]
+
+
+def collect_file_list(directory: Path, extensions):
     ext_set = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
+    files = [
+        path for path in directory.rglob("*")
+        if path.is_file() and path.suffix.lower() in ext_set
+    ]
+    return sorted(files, key=natural_sort_key)
+
+
+def collect_pairs(
+    image_dir: Path,
+    mask_dir: Path,
+    extensions,
+    image_stem_prefix: str = "",
+    image_stem_suffix: str = "",
+    mask_stem_prefix: str = "",
+    mask_stem_suffix: str = "",
+    pairing_mode: str = "stem",
+):
+    ext_set = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
+    if pairing_mode == "sequential":
+        image_paths = collect_file_list(image_dir, ext_set)
+        mask_paths = collect_file_list(mask_dir, ext_set)
+        if not image_paths or not mask_paths:
+            return [], []
+        pair_count = min(len(image_paths), len(mask_paths))
+        missing_masks = []
+        if len(image_paths) != len(mask_paths):
+            missing_masks = [
+                path.stem for path in image_paths[pair_count:]
+            ]
+            print(
+                f"Warning: sequential pairing found {len(image_paths)} images and {len(mask_paths)} masks; "
+                f"using first {pair_count} pairs."
+            )
+        return list(zip(image_paths[:pair_count], mask_paths[:pair_count])), missing_masks
+
     image_paths = {}
     for path in image_dir.rglob("*"):
         if path.is_file() and path.suffix.lower() in ext_set:
-            image_paths[path.stem] = path
+            key = normalize_stem(path.stem, image_stem_prefix, image_stem_suffix)
+            if key in image_paths:
+                raise ValueError(
+                    f"Duplicate image key {key!r}: {image_paths[key]} and {path}. "
+                    "Adjust --image-stem-prefix/--image-stem-suffix or rename files."
+                )
+            image_paths[key] = path
+
+    mask_paths = {}
+    for path in mask_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in ext_set:
+            key = normalize_stem(path.stem, mask_stem_prefix, mask_stem_suffix)
+            if key in mask_paths:
+                raise ValueError(
+                    f"Duplicate mask key {key!r}: {mask_paths[key]} and {path}. "
+                    "Adjust --mask-stem-prefix/--mask-stem-suffix or rename files."
+                )
+            mask_paths[key] = path
+
     pairs = []
     missing_masks = []
-    for stem, image_path in sorted(image_paths.items()):
-        mask_path = None
-        for ext in ext_set:
-            candidate = mask_dir / f"{stem}{ext}"
-            if candidate.exists():
-                mask_path = candidate
-                break
-        if mask_path is None:
-            alt = list(mask_dir.rglob(f"{stem}.*"))
-            for candidate in alt:
-                if candidate.suffix.lower() in ext_set:
-                    mask_path = candidate
-                    break
-        if mask_path is None:
-            missing_masks.append(stem)
-            continue
-        pairs.append((image_path, mask_path))
+    for key, image_path in sorted(image_paths.items()):
+        mask_path = mask_paths.get(key)
+        if mask_path is not None:
+            pairs.append((image_path, mask_path))
+        else:
+            missing_masks.append(key)
     return pairs, missing_masks
 
 
@@ -391,7 +459,16 @@ def run_single_holdout(args, holdout_site: Path, site_dirs, metadata_map):
     for site_dir in train_sites:
         image_dir = site_dir / "data_npy"
         mask_dir = site_dir / "label_npy"
-        pairs, _ = collect_pairs(image_dir, mask_dir, args.extensions)
+        pairs, _ = collect_pairs(
+            image_dir,
+            mask_dir,
+            args.extensions,
+            image_stem_prefix=args.image_stem_prefix,
+            image_stem_suffix=args.image_stem_suffix,
+            mask_stem_prefix=args.mask_stem_prefix,
+            mask_stem_suffix=args.mask_stem_suffix,
+            pairing_mode=args.pairing_mode,
+        )
         if args.limit_per_site is not None:
             pairs = pairs[:args.limit_per_site]
         if pairs:
@@ -531,7 +608,16 @@ def evaluate_holdout_site(
 
     image_dir = holdout_site / "val_data_npy"
     mask_dir = holdout_site / "val_label_npy"
-    pairs, missing_masks = collect_pairs(image_dir, mask_dir, args.extensions)
+    pairs, missing_masks = collect_pairs(
+        image_dir,
+        mask_dir,
+        args.extensions,
+        image_stem_prefix=args.image_stem_prefix,
+        image_stem_suffix=args.image_stem_suffix,
+        mask_stem_prefix=args.mask_stem_prefix,
+        mask_stem_suffix=args.mask_stem_suffix,
+        pairing_mode=args.pairing_mode,
+    )
     if args.limit_per_site is not None:
         pairs = pairs[:args.limit_per_site]
     if not pairs:
